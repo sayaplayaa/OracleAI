@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { HeroIcon } from "./HeroIcon";
 import { MatchupList } from "./MatchupList";
 import { RoleTabs } from "./RoleTabs";
@@ -16,6 +17,7 @@ import type {
 } from "@/lib/types";
 
 export function DraftExplorer({ heroes }: { heroes: HeroSummary[] }) {
+  const searchParams = useSearchParams();
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<HeroSummary | null>(null);
 
@@ -91,6 +93,16 @@ export function DraftExplorer({ heroes }: { heroes: HeroSummary[] }) {
         setRolesError(err instanceof Error ? err.message : "Failed to load role data")
       );
   }
+
+  // Deep-link support: /drafts?hero=74 auto-selects that hero, e.g. from a
+  // Hero Guide page's "Full item build & talents" link.
+  useEffect(() => {
+    const heroIdParam = Number(searchParams.get("hero"));
+    if (!Number.isInteger(heroIdParam) || heroIdParam <= 0) return;
+    const match = heroes.find((h) => h.id === heroIdParam);
+    if (match) selectHero(match);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, heroes]);
 
   return (
     <div className="space-y-6">

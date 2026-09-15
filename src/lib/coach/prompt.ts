@@ -1,4 +1,7 @@
 import type {
+  DraftInsights,
+  HeroAbility,
+  HeroRoleOverview,
   MatchMetrics,
   MatchStory,
   ProHeroSpotlight,
@@ -66,4 +69,29 @@ ${JSON.stringify(userPerformance, null, 2)}
 
 ${proSpotlight.pro.name}'s data on ${proSpotlight.heroName} (their own recent games on this hero):
 ${JSON.stringify(proSpotlight, null, 2)}`;
+}
+
+export function buildHeroGuidePrompt(
+  heroName: string,
+  abilities: HeroAbility[],
+  roleOverview: HeroRoleOverview,
+  matchups: DraftInsights
+): string {
+  return `Write a Dota 2 hero guide for ${heroName} using the submit_hero_guide tool. This is general hero knowledge for any player learning the hero, not personal coaching for one player's performance.
+
+Rules:
+- Every tip must cite either a real ability name/effect from the kit below, or a real number from the role/matchup data below (e.g. "Mana Void deals damage per point of missing mana" or "62% win rate as Position 1, 340 games" or "38% win rate vs Axe, 25 games").
+- Never invent an ability effect, cooldown, or matchup that isn't represented in this data.
+- "laningTips" and "powerSpikeTips" should be grounded in the ability kit (what each ability does early, when it comes online).
+- "teamfightTips" should be grounded in the ability kit's teamfight-relevant effects.
+- "matchupTips" should be grounded in the real toughest/best matchups listed below - what to do differently against/with those specific heroes.
+
+Real ability kit (official game data):
+${JSON.stringify(abilities, null, 2)}
+
+Real role win rates (current week, STRATZ):
+${JSON.stringify(roleOverview, null, 2)}
+
+Real matchup data (OpenDota, all-time):
+${JSON.stringify({ toughestMatchups: matchups.toughestMatchups, bestMatchups: matchups.bestMatchups }, null, 2)}`;
 }

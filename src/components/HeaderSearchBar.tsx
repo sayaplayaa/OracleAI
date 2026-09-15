@@ -37,13 +37,10 @@ export function HeaderSearchBar({
     const matchId = resolveMatchId(query);
     if (matchId !== null) {
       reset();
-      if (!sessionAccountId) {
-        setError("Sign in through Steam to open a match by ID, or search a player instead.");
-        setOpen(true);
-        return;
-      }
       setQuery("");
-      router.push(`/player/${sessionAccountId}/match/${matchId}`);
+      router.push(
+        sessionAccountId ? `/player/${sessionAccountId}/match/${matchId}` : `/matches/${matchId}`
+      );
       return;
     }
 

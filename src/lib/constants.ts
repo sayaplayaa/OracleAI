@@ -94,6 +94,11 @@ export function getHeroTalents(heroId: number): { name: string; level: number }[
   return heroAbilitiesByName[hero.name]?.talents ?? [];
 }
 
+/** dotaconstants' internal hero key (e.g. "npc_dota_hero_antimage"), used to look up its ability kit. */
+export function getHeroInternalName(heroId: number): string | null {
+  return heroes[String(heroId)]?.name ?? null;
+}
+
 function prettifyConstName(name: string, stripPrefix: string): string {
   return name
     .replace(stripPrefix, "")

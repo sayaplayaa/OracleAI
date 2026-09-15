@@ -33,6 +33,24 @@ export async function SiteHeader() {
             Heroes
           </Link>
           <Link
+            href="/heroes"
+            className="text-sm text-ink-secondary hover:text-ink transition"
+          >
+            Guides
+          </Link>
+          <Link
+            href="/tournaments"
+            className="text-sm text-ink-secondary hover:text-ink transition"
+          >
+            Tournaments
+          </Link>
+          <Link
+            href="/challenges"
+            className="text-sm text-ink-secondary hover:text-ink transition"
+          >
+            Challenges
+          </Link>
+          <Link
             href="/riddles"
             className="text-sm text-ink-secondary hover:text-ink transition"
           >

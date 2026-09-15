@@ -1,6 +1,6 @@
 import type { CoachFinding, CoachReport as CoachReportType } from "@/lib/types";
 
-function FindingList({
+export function FindingList({
   title,
   findings,
   accent,

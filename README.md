@@ -47,9 +47,11 @@ Open http://localhost:3000.
 Home leads with **Sign in through Steam** (real OpenID 2.0, verified
 server-side against Steam - no Steam Web API key needed) behind a small
 parallax/blur decorative background. The header (present on every page) has
-a compact search bar (player by ID/URL/name, or a match ID/link - matches
-open under your own signed-in account), and the logo links to your own
-profile once signed in, or home otherwise.
+a compact search bar (player by ID/URL/name, or a match ID/link - opens
+under your own signed-in account when you have one, otherwise via the
+account-less `/matches/[matchId]` entry point) and nav to Heroes, Guides,
+Tournaments, Challenges, and Riddles; the logo links to your own profile
+once signed in, or home otherwise.
 
 ### Player profile (`/player/[accountId]`)
 
@@ -124,6 +126,51 @@ a hero at 100% over 3 games no longer outranks one at 58% over 5,000, and a
 hero rarely played in a role (e.g. Anti-Mage as Hard Support) doesn't get
 inflated by a tiny lucky sample.
 
+### Guides (`/heroes`, `/heroes/[heroId]`)
+
+A per-hero reference page, distinct from the Heroes/`/drafts` stats hub
+above:
+- **Ability kit** - every real ability (name, official description,
+  numeric attributes, icon), straight from `dotaconstants`' game-client
+  data. No fetch, no fabrication - it's always present.
+- **Role win rates** and **matchups** - the same STRATZ/OpenDota data shown
+  in Hero Explorer, reused here rather than recomputed, with a link back to
+  the full Build Inspector for that hero (`/drafts?hero={id}`, which now
+  deep-links Hero Explorer to a preselected hero).
+- **AI hero guide** - a written guide (laning, power spikes, teamfighting,
+  matchups) grounded in the real ability kit and stats above, via its own
+  forced-tool-use schema (separate from personal coaching - this is general
+  hero knowledge, not about any one player's performance).
+
+### Tournaments (`/tournaments`)
+
+Real competitive Dota, not personal stats:
+- **Live now** - currently-live tournament games (OpenDota's live-match feed
+  filtered to ones with a real `league_id`), shown only when something
+  actually is live - OpenDota tracks live pro games sparsely, so this
+  section is simply absent otherwise rather than showing a placeholder.
+- **Recent results** - real finished league/tournament matches (teams,
+  final score, league name), filterable by league, each linking to a full
+  match breakdown via `/matches/[matchId]` (a new account-less entry point
+  that resolves a real participant from the match and forwards to the
+  existing match page - also used now by the header search for match-ID
+  lookups when you're signed out, which previously required signing in).
+- There's no public schedule of upcoming matches on OpenDota, so this is
+  results + live only, not a fixture list.
+
+### Challenges (`/challenges`)
+
+Training goals generated from your own real recent games (last 20), not
+canned suggestions - e.g. "finish a game with fewer than N deaths" or "hit
+N GPM on {your most-played hero}," with N computed from your own recent
+average. Deliberately rule-based rather than AI-generated, since these are
+precise numeric thresholds where a model could plausibly invent a
+slightly-wrong number. A challenge only completes when a real subsequent
+match actually clears the bar (checked against freshly fetched matches, not
+self-reported) and links to that match. Progress is saved in
+`localStorage`, tied to this browser rather than your account - there's no
+database, consistent with the rest of the app.
+
 ### Dota Riddles (`/riddles`)
 
 Scenario-based, multiple-choice questions on map awareness, vision, timing,
@@ -186,6 +233,14 @@ fields.
   right now"), falling back to any tagged pro who's shown up in one of those
   recent league games otherwise - "pro" here spans regional/qualifier-level
   competition, not just Tier 1.
+- **Tournaments** has no upcoming-match schedule - OpenDota's public API
+  doesn't expose one. Live tournament coverage is also sparse (most live pro
+  games aren't tracked by OpenDota's spectate feed), so "Live now" is often
+  empty even during an active tournament.
+- **Challenges** progress lives in `localStorage`: it's per-browser, not
+  per-account - switching devices or browsers starts fresh. Verification
+  only looks at your most recent 20 matches fetched at the time you check
+  back, so a qualifying game outside that window won't be picked up.
 
 ## Project layout
 
@@ -193,10 +248,14 @@ fields.
 src/
   app/                        pages + API routes
     api/auth/                 Steam OpenID login/callback/session/logout
-    api/coach/                match, trends, match-story, hero AI reports
+    api/coach/                match, trends, match-story, hero, hero-guide, pro-comparison AI reports
     api/hero/[heroId]/        matchups, roles, build (Hero Explorer)
     api/meta/                 Heroes Meta tab
     drafts/                   Heroes page (Meta + Hero Explorer)
+    heroes/, heroes/[heroId]/ Guides (ability kit + AI hero guide)
+    tournaments/              Tournament Tracker (live + recent results)
+    matches/[matchId]/        account-less match entry point (redirects)
+    challenges/               Training Challenges
     riddles/                  Dota Riddles + Map Guide
     player/[accountId]/       profile (Overview + Match History)
     player/[accountId]/match/[matchId]/   match detail (3 tabs)
@@ -205,9 +264,10 @@ src/
     stratz.ts                   STRATZ GraphQL client (cached, batched)
     steamAuth.ts                 Steam OpenID + session cookie signing
     steamId.ts                    Steam32/64/URL and match-ID parsing
-    constants.ts                   hero/item/rank lookups (dotaconstants)
+    constants.ts, heroAbilities.ts  hero/item/rank/ability lookups (dotaconstants)
     riddles.ts, mapGuides.ts        hand-authored coaching content
-    metrics/                        raw data -> grounded metrics (match, trend, role comparison, match story, hero build, signature hero, draft insights)
+    challenges.ts, challengeStorage.ts   rule-based challenge generation + localStorage
+    metrics/                        raw data -> grounded metrics (match, trend, role comparison, match story, hero build, signature hero, draft insights, pro comparison, tournaments)
     coach/                           prompt + schema + Anthropic client for the AI coach
   components/                UI
 public/

@@ -1,6 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type {
   CoachReport,
+  DraftInsights,
+  HeroAbility,
+  HeroGuideReport,
+  HeroRoleOverview,
   MatchMetrics,
   MatchStory,
   ProHeroSpotlight,
@@ -8,10 +12,11 @@ import type {
   TrendMetrics,
 } from "../types";
 import type { HeroPerformanceSummary } from "../metrics/signatureHero";
-import { coachReportTool } from "./schema";
+import { coachReportTool, heroGuideTool } from "./schema";
 import {
   SYSTEM_PROMPT,
   buildHeroCoachPrompt,
+  buildHeroGuidePrompt,
   buildMatchCoachPrompt,
   buildMatchStoryCoachPrompt,
   buildProComparisonPrompt,
@@ -33,7 +38,7 @@ function getClient(): Anthropic {
   return client;
 }
 
-async function runCoach(userPrompt: string): Promise<CoachReport> {
+async function runCoach<T>(userPrompt: string, tool: Anthropic.Tool): Promise<T> {
   const anthropic = getClient();
   const model = process.env.CLAUDE_MODEL || "claude-sonnet-5";
 
@@ -41,8 +46,8 @@ async function runCoach(userPrompt: string): Promise<CoachReport> {
     model,
     max_tokens: 2048,
     system: SYSTEM_PROMPT,
-    tools: [coachReportTool],
-    tool_choice: { type: "tool", name: coachReportTool.name },
+    tools: [tool],
+    tool_choice: { type: "tool", name: tool.name },
     messages: [{ role: "user", content: userPrompt }],
   });
 
@@ -51,31 +56,49 @@ async function runCoach(userPrompt: string): Promise<CoachReport> {
     throw new Error("AI coach did not return a structured report.");
   }
 
-  return toolUse.input as CoachReport;
+  return toolUse.input as T;
 }
 
 export function coachMatch(metrics: MatchMetrics): Promise<CoachReport> {
-  return runCoach(buildMatchCoachPrompt(metrics));
+  return runCoach<CoachReport>(buildMatchCoachPrompt(metrics), coachReportTool);
 }
 
 export function coachTrends(metrics: TrendMetrics): Promise<CoachReport> {
-  return runCoach(buildTrendCoachPrompt(metrics));
+  return runCoach<CoachReport>(buildTrendCoachPrompt(metrics), coachReportTool);
 }
 
 export function coachMatchStory(
   roleComparisons: RoleComparisonEntry[],
   matchStory: MatchStory
 ): Promise<CoachReport> {
-  return runCoach(buildMatchStoryCoachPrompt(roleComparisons, matchStory));
+  return runCoach<CoachReport>(
+    buildMatchStoryCoachPrompt(roleComparisons, matchStory),
+    coachReportTool
+  );
 }
 
 export function coachHero(performance: HeroPerformanceSummary): Promise<CoachReport> {
-  return runCoach(buildHeroCoachPrompt(performance));
+  return runCoach<CoachReport>(buildHeroCoachPrompt(performance), coachReportTool);
 }
 
 export function coachProComparison(
   userPerformance: HeroPerformanceSummary,
   proSpotlight: ProHeroSpotlight
 ): Promise<CoachReport> {
-  return runCoach(buildProComparisonPrompt(userPerformance, proSpotlight));
+  return runCoach<CoachReport>(
+    buildProComparisonPrompt(userPerformance, proSpotlight),
+    coachReportTool
+  );
+}
+
+export function coachHeroGuide(
+  heroName: string,
+  abilities: HeroAbility[],
+  roleOverview: HeroRoleOverview,
+  matchups: DraftInsights
+): Promise<HeroGuideReport> {
+  return runCoach<HeroGuideReport>(
+    buildHeroGuidePrompt(heroName, abilities, roleOverview, matchups),
+    heroGuideTool
+  );
 }

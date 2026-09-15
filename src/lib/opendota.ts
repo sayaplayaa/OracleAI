@@ -10,6 +10,9 @@ import type {
   OpenDotaMatchupEntry,
   OpenDotaProPlayer,
   OpenDotaHeroLeagueMatch,
+  OpenDotaProMatch,
+  OpenDotaLiveMatch,
+  OpenDotaLeague,
   ParseJobResponse,
 } from "./types";
 
@@ -130,6 +133,23 @@ export function getHeroLeagueMatches(heroId: number) {
   return cached(`heroLeagueMatches:${heroId}`, 30 * MINUTE, () =>
     request<OpenDotaHeroLeagueMatch[]>(`/heroes/${heroId}/matches`)
   );
+}
+
+// Recent finished tournament/league matches - real results, not pubs.
+export function getProMatches() {
+  return cached("proMatches", 5 * MINUTE, () => request<OpenDotaProMatch[]>("/proMatches"));
+}
+
+// Currently-live spectatable games (mostly public; filter to league_id != 0
+// for real tournament games, which OpenDota only tracks sparsely).
+export function getLiveMatches() {
+  return cached("liveMatches", MINUTE, () => request<OpenDotaLiveMatch[]>("/live"));
+}
+
+// League metadata (name, tier) - large and slow-changing, cache generously.
+// Used to resolve /live's league_id to a real league name.
+export function getLeagues() {
+  return cached("leagues", 24 * 60 * MINUTE, () => request<OpenDotaLeague[]>("/leagues"));
 }
 
 /** Triggers OpenDota to (re-)parse a match's replay. Not cached - each call queues a real job. */

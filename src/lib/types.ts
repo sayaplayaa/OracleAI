@@ -209,6 +209,40 @@ export interface OpenDotaProPlayer {
   is_locked: boolean | null;
 }
 
+// A finished league/tournament match from OpenDota's proMatches feed.
+export interface OpenDotaProMatch {
+  match_id: number;
+  duration: number;
+  start_time: number;
+  radiant_team_id: number | null;
+  radiant_name: string | null;
+  dire_team_id: number | null;
+  dire_name: string | null;
+  leagueid: number;
+  league_name: string;
+  radiant_score: number;
+  dire_score: number;
+  radiant_win: boolean;
+}
+
+// A currently-live match from OpenDota's spectate feed. league_id is 0 for
+// plain public games - only non-zero entries are real tournament games.
+export interface OpenDotaLiveMatch {
+  match_id: string;
+  league_id: number;
+  game_time: number;
+  team_name_radiant: string;
+  team_name_dire: string;
+  radiant_score: number;
+  dire_score: number;
+}
+
+export interface OpenDotaLeague {
+  leagueid: number;
+  name: string;
+  tier: string | null;
+}
+
 // One row from OpenDota's recent-matches-for-a-hero feed. Unlike /rankings
 // (top public-match performers, not necessarily pros), every match here has
 // a leagueid - these are genuine tournament/league games.
@@ -339,6 +373,25 @@ export interface CoachReport {
   strengths: CoachFinding[];
   weaknesses: CoachFinding[];
   tips: CoachFinding[];
+}
+
+// ---- Hero guide (real ability kit + AI write-up grounded in it) ----
+
+export interface HeroAbility {
+  key: string;
+  name: string;
+  description: string;
+  isInnate: boolean;
+  attributes: { header: string; value: string }[];
+  iconUrl: string;
+}
+
+export interface HeroGuideReport {
+  identity: string;
+  laningTips: CoachFinding[];
+  powerSpikeTips: CoachFinding[];
+  teamfightTips: CoachFinding[];
+  matchupTips: CoachFinding[];
 }
 
 // ---- Full match (all 10 players) ----
