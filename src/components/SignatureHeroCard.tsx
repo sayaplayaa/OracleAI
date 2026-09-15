@@ -1,4 +1,5 @@
-import { HeroSplashHeader } from "./HeroSplashHeader";
+import { getHeroImage } from "@/lib/constants";
+import { TiltCard } from "./TiltCard";
 import { AICoachPanel } from "./AICoachPanel";
 
 export function SignatureHeroCard({
@@ -14,17 +15,31 @@ export function SignatureHeroCard({
   games: number;
   winRate: number;
 }) {
+  const image = getHeroImage(heroId);
+
   return (
     <div className="space-y-3">
-      <HeroSplashHeader
-        heroId={heroId}
-        eyebrow="Signature hero"
-        title={heroName}
-        accent="var(--color-accent)"
-        subtitle={
-          <>
+      <TiltCard className="relative rounded-xl overflow-hidden border border-border aspect-square">
+        <div
+          className="absolute inset-0 bg-cover bg-center scale-125"
+          style={{ backgroundImage: image ? `url(${image})` : undefined }}
+        />
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              "linear-gradient(180deg, rgba(10,11,13,0.1) 0%, rgba(10,11,13,0.6) 65%, var(--color-page) 100%)",
+          }}
+        />
+        <div className="relative h-full flex flex-col justify-end p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-accent mb-1">
+            Signature hero
+          </p>
+          <h3 className="text-xl font-bold text-ink drop-shadow">{heroName}</h3>
+          <p className="text-xs text-ink-secondary mt-1">
             {games.toLocaleString()} games ·{" "}
             <span
+              className="font-semibold"
               style={{
                 color:
                   winRate >= 0.5
@@ -34,9 +49,9 @@ export function SignatureHeroCard({
             >
               {Math.round(winRate * 100)}% win rate
             </span>
-          </>
-        }
-      />
+          </p>
+        </div>
+      </TiltCard>
       <AICoachPanel
         endpoint="/api/coach/hero"
         body={{ accountId, heroId }}

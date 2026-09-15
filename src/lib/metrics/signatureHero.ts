@@ -10,8 +10,8 @@ export interface HeroPerformanceSummary {
   recentGames: number;
   recentWinRate: number;
   avgKda: number;
-  avgGpm: number;
-  avgXpm: number;
+  avgGpm: number | null;
+  avgXpm: number | null;
 }
 
 export function findSignatureHero(
@@ -44,13 +44,14 @@ export function computeHeroPerformance(
     recentGames,
     recentWinRate: recentGames > 0 ? recentWins / recentGames : 0,
     avgKda: Math.round(avgKda * 100) / 100,
-    avgGpm:
-      recentGames > 0
-        ? Math.round(matchesOnHero.reduce((s, m) => s + m.gold_per_min, 0) / recentGames)
-        : 0,
-    avgXpm:
-      recentGames > 0
-        ? Math.round(matchesOnHero.reduce((s, m) => s + m.xp_per_min, 0) / recentGames)
-        : 0,
+    avgGpm: averageDefined(matchesOnHero.map((m) => m.gold_per_min)),
+    avgXpm: averageDefined(matchesOnHero.map((m) => m.xp_per_min)),
   };
+}
+
+function averageDefined(values: (number | undefined)[]): number | null {
+  const defined = values.filter((v): v is number => v !== undefined);
+  return defined.length > 0
+    ? Math.round(defined.reduce((s, v) => s + v, 0) / defined.length)
+    : null;
 }

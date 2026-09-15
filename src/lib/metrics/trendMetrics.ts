@@ -32,9 +32,36 @@ export function toMatchSummary(m: OpenDotaRecentMatch): TrendMatchSummary {
     kills: m.kills,
     deaths: m.deaths,
     assists: m.assists,
-    gpm: m.gold_per_min,
-    xpm: m.xp_per_min,
+    gpm: m.gold_per_min ?? null,
+    xpm: m.xp_per_min ?? null,
   };
+}
+
+/**
+ * Picks the matches most worth reviewing out of a pool, rather than just the
+ * most recent N: losses are weighted highest (the most instructive to break
+ * down), then games where KDA or deaths were notably worse than the
+ * player's own average. Returned newest-first.
+ */
+export function selectNotableMatches(
+  matches: TrendMatchSummary[],
+  avgKda: number,
+  count: number
+): TrendMatchSummary[] {
+  const scored = matches.map((m) => {
+    const kda = m.deaths === 0 ? m.kills + m.assists : (m.kills + m.assists) / m.deaths;
+    const score =
+      (m.win ? 0 : 3) + // losses are the most useful to analyze
+      Math.max(0, avgKda - kda) + // underperformed your own average KDA
+      (m.deaths >= 10 ? 2 : 0); // unusually death-heavy game
+    return { match: m, score };
+  });
+
+  return scored
+    .sort((a, b) => b.score - a.score)
+    .slice(0, count)
+    .map((s) => s.match)
+    .sort((a, b) => b.startTime - a.startTime);
 }
 
 export function computeTrendMetrics(
@@ -51,14 +78,23 @@ export function computeTrendMetrics(
   const totalDeaths = matches.reduce((s, m) => s + m.deaths, 0);
   const totalAssists = matches.reduce((s, m) => s + m.assists, 0);
 
+  // OpenDota's match-list endpoint doesn't always include gold_per_min/
+  // xp_per_min - average only over matches that actually have it, and
+  // report null (never a fabricated 0) when none do.
+  const gpmSamples = matches
+    .map((m) => m.gold_per_min)
+    .filter((v): v is number => v !== undefined);
+  const xpmSamples = matches
+    .map((m) => m.xp_per_min)
+    .filter((v): v is number => v !== undefined);
   const avgGpm =
-    sampleSize > 0
-      ? matches.reduce((s, m) => s + m.gold_per_min, 0) / sampleSize
-      : 0;
+    gpmSamples.length > 0
+      ? gpmSamples.reduce((s, v) => s + v, 0) / gpmSamples.length
+      : null;
   const avgXpm =
-    sampleSize > 0
-      ? matches.reduce((s, m) => s + m.xp_per_min, 0) / sampleSize
-      : 0;
+    xpmSamples.length > 0
+      ? xpmSamples.reduce((s, v) => s + v, 0) / xpmSamples.length
+      : null;
   const avgDeaths = sampleSize > 0 ? totalDeaths / sampleSize : 0;
   const avgKda =
     totalDeaths === 0 ? totalKills + totalAssists : (totalKills + totalAssists) / totalDeaths;
@@ -91,11 +127,15 @@ export function computeTrendMetrics(
     sampleSize,
     winRate: sampleSize > 0 ? wins / sampleSize : 0,
     avgKda: Math.round(avgKda * 100) / 100,
-    avgGpm: Math.round(avgGpm),
-    avgXpm: Math.round(avgXpm),
+    avgGpm: avgGpm !== null ? Math.round(avgGpm) : null,
+    avgXpm: avgXpm !== null ? Math.round(avgXpm) : null,
     avgDeaths: Math.round(avgDeaths * 100) / 100,
-    gpmTrend: chronological.map((m, i) => ({ match: i + 1, value: m.gold_per_min })),
-    xpmTrend: chronological.map((m, i) => ({ match: i + 1, value: m.xp_per_min })),
+    gpmTrend: chronological
+      .map((m, i) => ({ match: i + 1, value: m.gold_per_min }))
+      .filter((p): p is { match: number; value: number } => p.value !== undefined),
+    xpmTrend: chronological
+      .map((m, i) => ({ match: i + 1, value: m.xp_per_min }))
+      .filter((p): p is { match: number; value: number } => p.value !== undefined),
     deathsTrend: chronological.map((m, i) => ({ match: i + 1, value: m.deaths })),
     roleDistribution,
     topHeroes,

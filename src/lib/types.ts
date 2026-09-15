@@ -12,6 +12,10 @@ export interface OpenDotaProfile {
   };
   rank_tier: number | null;
   leaderboard_rank: number | null;
+  // OpenDota's own MMR estimate, computed from recorded match history/
+  // opponent skill - not Valve's official MMR (which no public API exposes),
+  // but a real fetched number rather than something we derive ourselves.
+  computed_mmr?: number | null;
 }
 
 export interface OpenDotaWinLoss {
@@ -33,8 +37,10 @@ export interface OpenDotaRecentMatch {
   assists: number;
   skill?: number;
   average_rank?: number;
-  xp_per_min: number;
-  gold_per_min: number;
+  // A small fraction of matches (very old or unusual game modes) come back
+  // without these - never assume present.
+  xp_per_min?: number;
+  gold_per_min?: number;
   hero_damage: number;
   tower_damage: number;
   hero_healing: number;
@@ -228,8 +234,10 @@ export interface TrendMatchSummary {
   kills: number;
   deaths: number;
   assists: number;
-  gpm: number;
-  xpm: number;
+  // OpenDota's match-list endpoint doesn't always include these - null means
+  // genuinely unavailable for this match, never a fabricated 0.
+  gpm: number | null;
+  xpm: number | null;
 }
 
 export interface TrendMetrics {
@@ -237,8 +245,8 @@ export interface TrendMetrics {
   sampleSize: number;
   winRate: number;
   avgKda: number;
-  avgGpm: number;
-  avgXpm: number;
+  avgGpm: number | null;
+  avgXpm: number | null;
   avgDeaths: number;
   gpmTrend: { match: number; value: number }[];
   xpmTrend: { match: number; value: number }[];

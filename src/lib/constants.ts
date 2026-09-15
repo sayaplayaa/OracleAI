@@ -122,6 +122,114 @@ export function getPatchName(patchId: number | undefined): string | null {
   return patchesById[patchId]?.name ?? null;
 }
 
+// Valve doesn't expose exact numeric MMR through any public API. OpenDota
+// does compute and publish its own estimate per player (`computed_mmr`,
+// from recorded match history) - that's real fetched data, so we use it as
+// the source of truth and derive the rank medal/star and "MMR to next rank"
+// from it, rather than from the coarser (and sometimes stale) `rank_tier`
+// medal field. The medal-to-MMR ladder itself (~154 MMR/star through
+// Ancient, ~200/star in Divine) is widely-cited 2026 community rank-
+// distribution data - not officially published by Valve either, but the
+// best available mapping, and it's only used to place a real number on the
+// ladder, not to invent the number itself.
+const RANK_MEDALS = [
+  "",
+  "Herald",
+  "Guardian",
+  "Crusader",
+  "Archon",
+  "Legend",
+  "Ancient",
+  "Divine",
+  "Immortal",
+];
+
+const RANK_COLORS: Record<number, string> = {
+  1: "#a1887f",
+  2: "#8bc34a",
+  3: "#4fc3f7",
+  4: "#7e57c2",
+  5: "#3f51b5",
+  6: "#26a69a",
+  7: "#42a5f5",
+  8: "#e0b04a",
+};
+
+const MMR_PER_STAR_STANDARD = 154; // Herald through Ancient
+const MMR_PER_STAR_DIVINE = 200;
+const ANCIENT_CEILING_MMR = 30 * MMR_PER_STAR_STANDARD; // 6 medals x 5 stars
+const IMMORTAL_FLOOR_MMR = ANCIENT_CEILING_MMR + 5 * MMR_PER_STAR_DIVINE;
+
+interface LadderRung {
+  mmr: number;
+  medalIndex: number;
+  star: number; // 0 for Immortal (no stars)
+}
+
+function buildRankLadder(): LadderRung[] {
+  const ladder: LadderRung[] = [];
+  for (let medalIndex = 1; medalIndex <= 6; medalIndex++) {
+    for (let star = 1; star <= 5; star++) {
+      const starsCompleted = (medalIndex - 1) * 5 + star;
+      ladder.push({ mmr: starsCompleted * MMR_PER_STAR_STANDARD, medalIndex, star });
+    }
+  }
+  for (let star = 1; star <= 5; star++) {
+    ladder.push({ mmr: ANCIENT_CEILING_MMR + star * MMR_PER_STAR_DIVINE, medalIndex: 7, star });
+  }
+  ladder.push({ mmr: IMMORTAL_FLOOR_MMR, medalIndex: 8, star: 0 });
+  return ladder;
+}
+
+const RANK_LADDER = buildRankLadder();
+
+function rungLabel(rung: LadderRung): string {
+  const medal = RANK_MEDALS[rung.medalIndex];
+  return rung.star > 0 ? `${medal} ${rung.star}` : medal;
+}
+
+export interface RankInfo {
+  mmr: number;
+  medal: string;
+  star: number | null;
+  label: string; // e.g. "Divine 3" or "Immortal"
+  color: string;
+  mmrToNextRank: number | null; // null only at the very top of the ladder
+  nextRankLabel: string | null;
+  leaderboardRank: number | null;
+}
+
+/** Derives rank medal/star and "MMR to next rank" directly from a real MMR number (OpenDota's computed_mmr), not from the separate rank_tier field. */
+export function getRankInfo(
+  mmr: number | null | undefined,
+  leaderboardRank: number | null | undefined
+): RankInfo | null {
+  if (mmr === null || mmr === undefined) return null;
+
+  let current = RANK_LADDER[0];
+  let nextIndex = -1;
+  for (let i = 0; i < RANK_LADDER.length; i++) {
+    if (RANK_LADDER[i].mmr <= mmr) {
+      current = RANK_LADDER[i];
+      nextIndex = i + 1;
+    } else {
+      break;
+    }
+  }
+  const next = nextIndex >= 0 && nextIndex < RANK_LADDER.length ? RANK_LADDER[nextIndex] : null;
+
+  return {
+    mmr: Math.round(mmr),
+    medal: RANK_MEDALS[current.medalIndex],
+    star: current.star || null,
+    label: rungLabel(current),
+    color: RANK_COLORS[current.medalIndex] ?? "#898781",
+    mmrToNextRank: next ? Math.max(0, Math.round(next.mmr - mmr)) : null,
+    nextRankLabel: next ? rungLabel(next) : null,
+    leaderboardRank: leaderboardRank ?? null,
+  };
+}
+
 export function getAllHeroes(): HeroSummary[] {
   return Object.values(heroes)
     .map((h) => ({

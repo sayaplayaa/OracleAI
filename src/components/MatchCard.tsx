@@ -53,8 +53,9 @@ export function MatchCard({
           </span>
         </div>
         <div className="text-xs text-ink-muted font-mono tabular-nums">
-          {match.kills}/{match.deaths}/{match.assists} · {match.gpm} GPM ·{" "}
-          {match.xpm} XPM
+          {match.kills}/{match.deaths}/{match.assists}
+          {match.gpm !== null && ` · ${match.gpm} GPM`}
+          {match.xpm !== null && ` · ${match.xpm} XPM`}
         </div>
       </div>
       <div className="text-right text-xs text-ink-muted shrink-0">

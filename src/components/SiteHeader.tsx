@@ -3,6 +3,7 @@ import Image from "next/image";
 import { cookies } from "next/headers";
 import { SESSION_COOKIE_NAME, verifySessionCookieValue } from "@/lib/steamAuth";
 import { getProfile } from "@/lib/opendota";
+import { HeaderSearchBar } from "./HeaderSearchBar";
 
 async function getSessionProfile() {
   const cookieStore = await cookies();
@@ -14,13 +15,14 @@ async function getSessionProfile() {
 
 export async function SiteHeader() {
   const session = await getSessionProfile();
+  const homeHref = session ? `/player/${session.accountId}` : "/";
 
   return (
     <header className="border-b border-border bg-page/95 backdrop-blur sticky top-0 z-10">
-      <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-between">
-        <div className="flex items-center gap-6">
-          <Link href="/" className="flex items-center gap-2">
-            <span className="text-lg font-bold text-ink">
+      <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-3.5 grid grid-cols-[1fr_auto_1fr] items-center gap-4">
+        <div className="flex items-center gap-6 shrink-0">
+          <Link href={homeHref} className="flex items-center gap-2">
+            <span className="text-lg font-bold text-ink whitespace-nowrap">
               Dota Coach <span className="text-accent">AI</span>
             </span>
           </Link>
@@ -30,10 +32,20 @@ export async function SiteHeader() {
           >
             Heroes
           </Link>
+          <Link
+            href="/riddles"
+            className="text-sm text-ink-secondary hover:text-ink transition"
+          >
+            Riddles
+          </Link>
+        </div>
+
+        <div className="justify-self-center">
+          <HeaderSearchBar sessionAccountId={session?.accountId ?? null} />
         </div>
 
         {session ? (
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 shrink-0 justify-self-end">
             <Link
               href={`/player/${session.accountId}`}
               className="flex items-center gap-2 text-sm text-ink-secondary hover:text-ink transition"
@@ -48,7 +60,7 @@ export async function SiteHeader() {
                   unoptimized
                 />
               )}
-              {session.personaname ?? "My profile"}
+              <span className="hidden sm:inline">{session.personaname ?? "My profile"}</span>
             </Link>
             <a
               href="/api/auth/logout"
@@ -60,7 +72,7 @@ export async function SiteHeader() {
         ) : (
           <a
             href="/api/auth/steam"
-            className="text-sm font-medium bg-accent hover:brightness-110 text-page px-3.5 py-1.5 rounded-md transition"
+            className="shrink-0 justify-self-end text-sm font-medium bg-accent hover:brightness-110 text-page px-3.5 py-1.5 rounded-md transition whitespace-nowrap"
           >
             Sign in through Steam
           </a>

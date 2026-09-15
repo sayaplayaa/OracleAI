@@ -8,12 +8,14 @@ import {
   getHeroStats,
   OpenDotaError,
 } from "@/lib/opendota";
-import { computeTrendMetrics } from "@/lib/metrics/trendMetrics";
+import { computeTrendMetrics, selectNotableMatches } from "@/lib/metrics/trendMetrics";
 import { findSignatureHero } from "@/lib/metrics/signatureHero";
-import { getHeroName } from "@/lib/constants";
+import { getHeroName, getRankInfo } from "@/lib/constants";
 import { StatTile } from "@/components/StatTile";
-import { TrendChart } from "@/components/TrendChart";
-import { HeroRankList } from "@/components/HeroRankList";
+import { RankTile } from "@/components/RankTile";
+import { MmrTile } from "@/components/MmrTile";
+import { RoleDistribution } from "@/components/RoleDistribution";
+import { RecentForm } from "@/components/RecentForm";
 import { MatchCard } from "@/components/MatchCard";
 import { MatchHistory } from "@/components/MatchHistory";
 import { SignatureHeroCard } from "@/components/SignatureHeroCard";
@@ -21,7 +23,11 @@ import { AICoachPanel } from "@/components/AICoachPanel";
 import { MatchTabs } from "@/components/MatchTabs";
 import { PageContainer } from "@/components/PageContainer";
 
-const MATCH_SAMPLE_SIZE = 10;
+// Overview pulls from this larger pool so it can pick the matches most worth
+// reviewing rather than just whatever happened most recently; Match History
+// reuses the same pool as its first page so "Load more" continues correctly.
+const POOL_SIZE = 20;
+const HIGHLIGHT_COUNT = 10;
 
 export default async function PlayerPage({
   params,
@@ -37,7 +43,7 @@ export default async function PlayerPage({
     [profile, winLoss, matches, heroStats] = await Promise.all([
       getProfile(accountId),
       getWinLoss(accountId),
-      getRecentMatches(accountId, MATCH_SAMPLE_SIZE),
+      getRecentMatches(accountId, POOL_SIZE),
       getHeroStats(accountId),
     ]);
   } catch (err) {
@@ -46,7 +52,13 @@ export default async function PlayerPage({
   }
 
   const trends = computeTrendMetrics(accountId, matches, heroStats);
+  const notableMatches = selectNotableMatches(
+    trends.recentMatches,
+    trends.avgKda,
+    HIGHLIGHT_COUNT
+  );
   const signatureHero = findSignatureHero(heroStats);
+  const rankInfo = getRankInfo(profile.computed_mmr, profile.leaderboard_rank);
   const lifetimeTotal = winLoss.win + winLoss.lose;
   const lifetimeWinRate = lifetimeTotal > 0 ? winLoss.win / lifetimeTotal : 0;
 
@@ -60,41 +72,51 @@ export default async function PlayerPage({
           value={`${Math.round(trends.winRate * 100)}%`}
         />
         <StatTile label="Avg KDA" value={`${trends.avgKda}`} />
-        <StatTile label="Avg GPM" value={`${trends.avgGpm}`} />
-        <StatTile label="Avg XPM" value={`${trends.avgXpm}`} />
+        <RankTile rank={rankInfo} />
+        <MmrTile rank={rankInfo} />
       </div>
 
-      <div className="grid lg:grid-cols-[2fr_1fr_1fr] gap-4 items-start">
-        <TrendChart metrics={trends} />
-        <HeroRankList title="Best heroes" heroes={trends.topHeroes} />
-        <HeroRankList title="Worst heroes" heroes={trends.worstHeroes} />
-      </div>
+      <div className="grid lg:grid-cols-[1fr_1.4fr] gap-4 items-start">
+        <div className="space-y-4">
+          {signatureHero && (
+            <SignatureHeroCard
+              accountId={accountId}
+              heroId={signatureHero.hero_id}
+              heroName={getHeroName(signatureHero.hero_id)}
+              games={signatureHero.games}
+              winRate={signatureHero.games > 0 ? signatureHero.win / signatureHero.games : 0}
+            />
+          )}
+          <AICoachPanel
+            endpoint="/api/coach/trends"
+            body={{ accountId, limit: POOL_SIZE }}
+            label="Get AI Trend Report"
+          />
+        </div>
 
-      {signatureHero && (
-        <SignatureHeroCard
-          accountId={accountId}
-          heroId={signatureHero.hero_id}
-          heroName={getHeroName(signatureHero.hero_id)}
-          games={signatureHero.games}
-          winRate={signatureHero.games > 0 ? signatureHero.win / signatureHero.games : 0}
-        />
-      )}
+        <div className="space-y-4">
+          <div className="grid sm:grid-cols-2 gap-4">
+            <RoleDistribution
+              distribution={trends.roleDistribution}
+              totalGames={trends.sampleSize}
+            />
+            <RecentForm accountId={accountId} matches={trends.recentMatches.slice(0, 10)} />
+          </div>
 
-      <div className="grid lg:grid-cols-[1fr_2fr] gap-4 items-start">
-        <AICoachPanel
-          endpoint="/api/coach/trends"
-          body={{ accountId, limit: MATCH_SAMPLE_SIZE }}
-          label="Get AI Trend Report"
-        />
-
-        <div>
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-secondary mb-3">
-            Last {MATCH_SAMPLE_SIZE} matches
-          </h2>
-          <div className="bg-surface border border-border rounded-lg divide-y divide-border overflow-hidden">
-            {trends.recentMatches.map((m) => (
-              <MatchCard key={m.matchId} accountId={accountId} match={m} />
-            ))}
+          <div>
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-secondary mb-1">
+              Matches worth reviewing
+            </h2>
+            <p className="text-xs text-ink-muted mb-3">
+              Picked from your last {trends.sampleSize} games - losses first,
+              then games where KDA or deaths were notably off your average.
+              Full history is in the Match History tab.
+            </p>
+            <div className="bg-surface border border-border rounded-lg divide-y divide-border overflow-hidden">
+              {notableMatches.map((m) => (
+                <MatchCard key={m.matchId} accountId={accountId} match={m} />
+              ))}
+            </div>
           </div>
         </div>
       </div>
