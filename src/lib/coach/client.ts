@@ -3,6 +3,7 @@ import type {
   CoachReport,
   MatchMetrics,
   MatchStory,
+  ProHeroSpotlight,
   RoleComparisonEntry,
   TrendMetrics,
 } from "../types";
@@ -13,6 +14,7 @@ import {
   buildHeroCoachPrompt,
   buildMatchCoachPrompt,
   buildMatchStoryCoachPrompt,
+  buildProComparisonPrompt,
   buildTrendCoachPrompt,
 } from "./prompt";
 
@@ -69,4 +71,11 @@ export function coachMatchStory(
 
 export function coachHero(performance: HeroPerformanceSummary): Promise<CoachReport> {
   return runCoach(buildHeroCoachPrompt(performance));
+}
+
+export function coachProComparison(
+  userPerformance: HeroPerformanceSummary,
+  proSpotlight: ProHeroSpotlight
+): Promise<CoachReport> {
+  return runCoach(buildProComparisonPrompt(userPerformance, proSpotlight));
 }

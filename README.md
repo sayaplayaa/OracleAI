@@ -65,8 +65,16 @@ profile once signed in, or home otherwise.
   why this isn't a literal 3D model) with real games/win-rate and an
   on-demand AI report ("Get tips for X") grounded in your recent games on
   that hero specifically.
-- **Lane distribution** and **recent form** (last 10 results as clickable,
-  win/loss-ringed hero icons).
+- **Pro spotlight** - a real, currently-active pro player (rostered on a
+  team, Fantasy-locked into an ongoing tournament period) who has actually
+  played your signature hero in a recent league game - found from OpenDota's
+  hero match feed (every row there is a real tournament game, unlike
+  `/rankings`' top public-ladder performers, which are a different set of
+  people entirely), cross-referenced against the `proPlayers` roster for a
+  real name/team. Shows their real games/win rate/KDA on that hero, links
+  into the actual tournament match(es) found, and a "Compare me to {pro}" AI
+  report grounded in both players' real numbers side by side.
+- **Recent form** (last 10 results as clickable, win/loss-ringed hero icons).
 - **Matches worth reviewing** - a curated 10 out of your last 20 games:
   losses weighted highest, then games where KDA/deaths were notably off your
   own average - not just "most recent."
@@ -109,6 +117,12 @@ Two tabs:
   items by tier, talent picks with "Most picked"/"Highest win", all from
   STRATZ's current-week data) plus counter-pick data from OpenDota and
   lane-partner synergy from STRATZ, under "Matchups."
+
+Every ranked list here (Meta tier list, toughest/best matchups, best lane
+partners) is sorted by a Wilson score confidence interval, not raw win rate -
+a hero at 100% over 3 games no longer outranks one at 58% over 5,000, and a
+hero rarely played in a role (e.g. Anti-Mage as Hard Support) doesn't get
+inflated by a tiny lucky sample.
 
 ### Dota Riddles (`/riddles`)
 
@@ -163,6 +177,15 @@ fields.
 - OpenDota's match-list endpoint doesn't always include `gold_per_min`/
   `xp_per_min` - handled as `null` (never a fabricated 0) everywhere it
   flows through.
+- **Pro spotlight** only looks at each hero's ~100 most recent league games
+  (OpenDota's hero match feed) for a player who's also on the `proPlayers`
+  roster - for very rarely-played heroes in the current pro meta that can
+  come up empty, in which case the card says so rather than showing a
+  fallback player. It prefers a player whose team is currently Fantasy-locked
+  into an active tournament period (the closest real signal to "playing
+  right now"), falling back to any tagged pro who's shown up in one of those
+  recent league games otherwise - "pro" here spans regional/qualifier-level
+  competition, not just Tier 1.
 
 ## Project layout
 

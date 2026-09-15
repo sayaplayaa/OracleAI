@@ -1,4 +1,10 @@
-import type { MatchMetrics, MatchStory, RoleComparisonEntry, TrendMetrics } from "../types";
+import type {
+  MatchMetrics,
+  MatchStory,
+  ProHeroSpotlight,
+  RoleComparisonEntry,
+  TrendMetrics,
+} from "../types";
 import type { HeroPerformanceSummary } from "../metrics/signatureHero";
 
 export const SYSTEM_PROMPT = `You are an expert Dota 2 coach reviewing a student's performance data.
@@ -43,4 +49,21 @@ export function buildHeroCoachPrompt(performance: HeroPerformanceSummary): strin
   return `Here is this player's performance data on their most-played hero, ${performance.heroName}: lifetime stats plus their most recent games on this specific hero. Produce a coaching report via the submit_coaching_report tool focused entirely on how to play this hero better - not general Dota advice.
 
 ${JSON.stringify(performance, null, 2)}`;
+}
+
+export function buildProComparisonPrompt(
+  userPerformance: HeroPerformanceSummary,
+  proSpotlight: ProHeroSpotlight
+): string {
+  return `Compare this player's performance on ${userPerformance.heroName} against a real professional/competitive player (${proSpotlight.pro.name}${proSpotlight.pro.teamName ? `, ${proSpotlight.pro.teamName}` : ""}) on the same hero, using the submit_coaching_report tool with this framing:
+- "strengths" = stats where this player already matches or beats the pro's numbers, each citing both numbers.
+- "weaknesses" = the biggest real gaps between this player's numbers and the pro's, each citing both numbers.
+- "tips" = concrete adjustments this player should make to close those gaps, grounded in the specific stat gap (not generic hero advice).
+- "summary" = 2-3 sentences on the single biggest thing to take from the pro's games on this hero.
+
+This player's data on ${userPerformance.heroName}:
+${JSON.stringify(userPerformance, null, 2)}
+
+${proSpotlight.pro.name}'s data on ${proSpotlight.heroName} (their own recent games on this hero):
+${JSON.stringify(proSpotlight, null, 2)}`;
 }

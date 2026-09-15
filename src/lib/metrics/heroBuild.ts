@@ -8,6 +8,7 @@ import {
   getItemTier,
 } from "../constants";
 import { formatStratzPosition } from "../stratz";
+import { wilsonScoreLowerBound } from "./statistics";
 import type {
   StratzHeroBuild,
   StratzHeroPositionStat,
@@ -91,8 +92,12 @@ export function computeMetaTierList(
       roleLabel: roleLabelForPosition(s.position),
       games: s.matchCount,
       winRate: s.matchCount > 0 ? s.winCount / s.matchCount : 0,
+      // Sort key only, not returned - ranks by confidence-adjusted win rate
+      // so a handful of lucky games can't outrank a large reliable sample.
+      _rankScore: wilsonScoreLowerBound(s.winCount, s.matchCount),
     }))
-    .sort((a, b) => b.winRate - a.winRate);
+    .sort((a, b) => b._rankScore - a._rankScore)
+    .map(({ _rankScore, ...entry }) => entry);
 }
 
 function toItemStat(row: StratzItemStat | StratzNeutralItemStat): ItemStat | null {

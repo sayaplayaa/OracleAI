@@ -8,6 +8,8 @@ import type {
   OpenDotaBenchmarks,
   OpenDotaSearchResult,
   OpenDotaMatchupEntry,
+  OpenDotaProPlayer,
+  OpenDotaHeroLeagueMatch,
   ParseJobResponse,
 } from "./types";
 
@@ -110,6 +112,23 @@ export function searchPlayers(query: string) {
 export function getHeroMatchups(heroId: number) {
   return cached(`matchups:${heroId}`, 60 * MINUTE, () =>
     request<OpenDotaMatchupEntry[]>(`/heroes/${heroId}/matchups`)
+  );
+}
+
+// Roster of accounts OpenDota tags as pro/notable competitive players. A
+// large, slow-changing list - cache generously.
+export function getProPlayers() {
+  return cached("proPlayers", 6 * 60 * MINUTE, () =>
+    request<OpenDotaProPlayer[]>("/proPlayers")
+  );
+}
+
+// Recent matches for a hero, but only league/tournament games (every row
+// has a leagueid) - the real "who's currently playing this hero in
+// competition" feed, as opposed to /rankings' top public-match performers.
+export function getHeroLeagueMatches(heroId: number) {
+  return cached(`heroLeagueMatches:${heroId}`, 30 * MINUTE, () =>
+    request<OpenDotaHeroLeagueMatch[]>(`/heroes/${heroId}/matches`)
   );
 }
 

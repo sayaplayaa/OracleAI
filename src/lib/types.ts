@@ -193,6 +193,40 @@ export interface ParseJobResponse {
   job?: { jobId: number };
 }
 
+export interface OpenDotaProPlayer {
+  account_id: number;
+  name: string | null;
+  team_name: string | null;
+  team_tag: string | null;
+  team_id: number | null;
+  // ISO timestamp of this account's last recorded match - used to tell a
+  // currently active competitive player from a retired/inactive one.
+  last_match_time: string | null;
+  // True while the player's team roster is locked for an active Fantasy
+  // Dota period, i.e. they're actively competing in an ongoing tournament -
+  // the best available real signal for "currently pro," as opposed to just
+  // being tagged in OpenDota's broader historical pro roster.
+  is_locked: boolean | null;
+}
+
+// One row from OpenDota's recent-matches-for-a-hero feed. Unlike /rankings
+// (top public-match performers, not necessarily pros), every match here has
+// a leagueid - these are genuine tournament/league games.
+export interface OpenDotaHeroLeagueMatch {
+  match_id: number;
+  start_time: number;
+  duration: number;
+  radiant_win: boolean;
+  leagueid: number;
+  league_name: string;
+  radiant: boolean;
+  player_slot: number;
+  account_id: number;
+  kills: number;
+  deaths: number;
+  assists: number;
+}
+
 // ---- App-level computed types ----
 
 export interface MetricPoint {
@@ -265,6 +299,34 @@ export interface TrendMetrics {
     winRate: number;
   }[];
   recentMatches: TrendMatchSummary[];
+}
+
+// ---- Pro hero spotlight (profile page: how a real pro plays your signature hero) ----
+
+// A real tournament/league game, not a pub match - the "showcase" sample.
+export interface ProHeroLeagueGame {
+  matchId: number;
+  win: boolean;
+  kills: number;
+  deaths: number;
+  assists: number;
+  duration: number;
+  startTime: number;
+  leagueName: string;
+}
+
+export interface ProHeroSpotlight {
+  heroId: number;
+  heroName: string;
+  pro: { accountId: number; name: string; teamName: string | null };
+  games: number;
+  winRate: number;
+  avgKda: number;
+  avgGpm: number | null;
+  avgXpm: number | null;
+  // Real recent league/tournament games this specific pro has played on this
+  // hero, found via OpenDota's hero-match feed - always at least one entry.
+  leagueGames: ProHeroLeagueGame[];
 }
 
 export interface CoachFinding {

@@ -1,6 +1,7 @@
 import { getHeroName } from "../constants";
 import type { DraftInsights, HeroMatchup, OpenDotaMatchupEntry } from "../types";
 import { formatStratzPosition, type StratzLaneOutcome } from "../stratz";
+import { wilsonScoreLowerBound, wilsonScoreUpperBound } from "./statistics";
 
 // Below this sample size a matchup's win rate is too noisy to act on.
 const MIN_GAMES_PLAYED = 20;
@@ -38,9 +39,11 @@ function computeLaneSynergy(laneSynergy: StratzLaneOutcome[]): {
       gamesPlayed: e.matchCount,
       wins: e.matchWinCount,
       winRate: e.matchWinCount / e.matchCount,
+      _rankScore: wilsonScoreLowerBound(e.matchWinCount, e.matchCount),
     }))
-    .sort((a, b) => b.winRate - a.winRate)
-    .slice(0, LIST_SIZE);
+    .sort((a, b) => b._rankScore - a._rankScore)
+    .slice(0, LIST_SIZE)
+    .map(({ _rankScore, ...entry }) => entry);
 
   return { bestLanePartners, lanePosition: formatStratzPosition(dominantPosition) };
 }
@@ -50,7 +53,7 @@ export function computeDraftInsights(
   matchups: OpenDotaMatchupEntry[],
   laneSynergy: StratzLaneOutcome[] = []
 ): DraftInsights {
-  const withWinRate: HeroMatchup[] = matchups
+  const withWinRate = matchups
     .filter((m) => m.games_played >= MIN_GAMES_PLAYED)
     .map((m) => ({
       heroId: m.hero_id,
@@ -58,14 +61,20 @@ export function computeDraftInsights(
       gamesPlayed: m.games_played,
       wins: m.wins,
       winRate: m.wins / m.games_played,
+      // Sort keys only, not returned - a matchup with few games shouldn't
+      // outrank one backed by thousands just because it got lucky/unlucky.
+      _lowScore: wilsonScoreLowerBound(m.wins, m.games_played),
+      _highScore: wilsonScoreUpperBound(m.wins, m.games_played),
     }));
 
-  const toughestMatchups = [...withWinRate]
-    .sort((a, b) => a.winRate - b.winRate)
-    .slice(0, LIST_SIZE);
-  const bestMatchups = [...withWinRate]
-    .sort((a, b) => b.winRate - a.winRate)
-    .slice(0, LIST_SIZE);
+  const toughestMatchups: HeroMatchup[] = [...withWinRate]
+    .sort((a, b) => a._highScore - b._highScore)
+    .slice(0, LIST_SIZE)
+    .map(({ _lowScore, _highScore, ...entry }) => entry);
+  const bestMatchups: HeroMatchup[] = [...withWinRate]
+    .sort((a, b) => b._lowScore - a._lowScore)
+    .slice(0, LIST_SIZE)
+    .map(({ _lowScore, _highScore, ...entry }) => entry);
 
   const { bestLanePartners, lanePosition } = computeLaneSynergy(laneSynergy);
 

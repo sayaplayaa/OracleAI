@@ -6,15 +6,19 @@ import {
   getWinLoss,
   getRecentMatches,
   getHeroStats,
+  getProPlayers,
+  getHeroLeagueMatches,
+  getMatchesForHero,
   OpenDotaError,
 } from "@/lib/opendota";
 import { computeTrendMetrics, selectNotableMatches } from "@/lib/metrics/trendMetrics";
 import { findSignatureHero } from "@/lib/metrics/signatureHero";
+import { computeProHeroSpotlight, findProForHero } from "@/lib/metrics/proComparison";
 import { getHeroName, getRankInfo } from "@/lib/constants";
 import { StatTile } from "@/components/StatTile";
 import { RankTile } from "@/components/RankTile";
 import { MmrTile } from "@/components/MmrTile";
-import { RoleDistribution } from "@/components/RoleDistribution";
+import { ProHeroSpotlightCard } from "@/components/ProHeroSpotlightCard";
 import { RecentForm } from "@/components/RecentForm";
 import { MatchCard } from "@/components/MatchCard";
 import { MatchHistory } from "@/components/MatchHistory";
@@ -59,6 +63,32 @@ export default async function PlayerPage({
   );
   const signatureHero = findSignatureHero(heroStats);
   const rankInfo = getRankInfo(profile.computed_mmr, profile.leaderboard_rank);
+
+  // Find a real, currently-active pro who has actually played the same
+  // signature hero in a recent tournament game - never a ladder grinder
+  // who happens to be tagged pro, and never a fabricated example.
+  let proSpotlight = null;
+  if (signatureHero) {
+    const [proPlayers, leagueMatches] = await Promise.all([
+      getProPlayers(),
+      getHeroLeagueMatches(signatureHero.hero_id),
+    ]);
+    const found = findProForHero(leagueMatches, proPlayers);
+    if (found) {
+      const [proHeroStats, proMatches] = await Promise.all([
+        getHeroStats(found.pro.accountId),
+        getMatchesForHero(found.pro.accountId, signatureHero.hero_id, 20),
+      ]);
+      const proHeroStat = proHeroStats.find((h) => h.hero_id === signatureHero.hero_id);
+      proSpotlight = computeProHeroSpotlight(
+        signatureHero.hero_id,
+        found.pro,
+        proHeroStat,
+        proMatches,
+        found.leagueGames
+      );
+    }
+  }
   const lifetimeTotal = winLoss.win + winLoss.lose;
   const lifetimeWinRate = lifetimeTotal > 0 ? winLoss.win / lifetimeTotal : 0;
 
@@ -96,10 +126,24 @@ export default async function PlayerPage({
 
         <div className="space-y-4">
           <div className="grid sm:grid-cols-2 gap-4">
-            <RoleDistribution
-              distribution={trends.roleDistribution}
-              totalGames={trends.sampleSize}
-            />
+            {proSpotlight && signatureHero ? (
+              <ProHeroSpotlightCard
+                accountId={accountId}
+                heroId={signatureHero.hero_id}
+                spotlight={proSpotlight}
+              />
+            ) : (
+              <div className="bg-surface border border-border rounded-lg p-4">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-secondary mb-2">
+                  Pro spotlight
+                </h3>
+                <p className="text-sm text-ink-muted">
+                  {signatureHero
+                    ? "No recent tournament game found for this hero yet."
+                    : "Play a few games to get a signature hero, then see how a pro plays it."}
+                </p>
+              </div>
+            )}
             <RecentForm accountId={accountId} matches={trends.recentMatches.slice(0, 10)} />
           </div>
 
