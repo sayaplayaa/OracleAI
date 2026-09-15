@@ -54,7 +54,7 @@ export function CoachReport({ report }: { report: CoachReportType }) {
         <FindingList
           title="Tips"
           findings={report.tips}
-          accent="var(--color-series-blue)"
+          accent="var(--color-accent)"
         />
       </div>
     </div>

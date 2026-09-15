@@ -2,6 +2,7 @@ import { getHeroName } from "../constants";
 import type {
   OpenDotaHeroStat,
   OpenDotaRecentMatch,
+  TrendMatchSummary,
   TrendMetrics,
 } from "../types";
 
@@ -15,9 +16,25 @@ const LANE_ROLE_NAMES: Record<number, string> = {
 const MIN_GAMES_FOR_HERO_RANKING = 3;
 const HERO_LIST_SIZE = 5;
 
-function isWin(match: OpenDotaRecentMatch): boolean {
+export function isWin(match: OpenDotaRecentMatch): boolean {
   const isRadiant = match.player_slot < 128;
   return isRadiant === match.radiant_win;
+}
+
+export function toMatchSummary(m: OpenDotaRecentMatch): TrendMatchSummary {
+  return {
+    matchId: m.match_id,
+    heroId: m.hero_id,
+    heroName: getHeroName(m.hero_id),
+    win: isWin(m),
+    startTime: m.start_time,
+    duration: m.duration,
+    kills: m.kills,
+    deaths: m.deaths,
+    assists: m.assists,
+    gpm: m.gold_per_min,
+    xpm: m.xp_per_min,
+  };
 }
 
 export function computeTrendMetrics(
@@ -83,18 +100,6 @@ export function computeTrendMetrics(
     roleDistribution,
     topHeroes,
     worstHeroes,
-    recentMatches: chronological.map((m) => ({
-      matchId: m.match_id,
-      heroId: m.hero_id,
-      heroName: getHeroName(m.hero_id),
-      win: isWin(m),
-      startTime: m.start_time,
-      duration: m.duration,
-      kills: m.kills,
-      deaths: m.deaths,
-      assists: m.assists,
-      gpm: m.gold_per_min,
-      xpm: m.xp_per_min,
-    })).reverse(), // newest-first for the match list display
+    recentMatches: chronological.map(toMatchSummary).reverse(), // newest-first for the match list display
   };
 }

@@ -80,9 +80,13 @@ tool call) where every strength/weakness/tip cites one of those fields.
 - Draft Explorer's lane-partner section requires a `STRATZ_API_KEY`; without
   one it's omitted rather than approximated, since OpenDota's own public API
   doesn't expose teammate-synergy stats.
-- STRATZ appears to tie API keys to the IP address they were issued from - if
-  you see a "different IP Addresses" error server-side, regenerate the key
-  from the machine/network actually running the app.
+- STRATZ ties API keys to the IP address they were issued from. If you see a
+  "different IP Addresses" (403) error server-side, the machine's outbound IP
+  has changed since the key was generated - regenerate it at
+  stratz.com/api and update `STRATZ_API_KEY`. **If you're on a VPN, this will
+  recur every time the VPN rotates its exit IP** (reconnect, sleep/wake,
+  server rebalancing) - the key only stays valid until that happens again.
+  There's no app-side fix for this; it's inherent to how STRATZ issues keys.
 - Full-match extras (net worth graph, farm sparklines, wards, heatmap) require
   OpenDota to have parsed the replay; very recent or low-priority matches may
   need the in-page "Request full parse" button first.

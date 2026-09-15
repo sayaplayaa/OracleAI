@@ -1,4 +1,5 @@
-import type { MatchMetrics, TrendMetrics } from "../types";
+import type { MatchMetrics, MatchStory, RoleComparisonEntry, TrendMetrics } from "../types";
+import type { HeroPerformanceSummary } from "../metrics/signatureHero";
 
 export const SYSTEM_PROMPT = `You are an expert Dota 2 coach reviewing a student's performance data.
 
@@ -19,4 +20,27 @@ export function buildTrendCoachPrompt(metrics: TrendMetrics): string {
   return `Here is aggregated performance data across this player's last ${metrics.sampleSize} matches. Produce a coaching report via the submit_coaching_report tool, focused on recurring patterns rather than any single game.
 
 ${JSON.stringify(metrics, null, 2)}`;
+}
+
+export function buildMatchStoryCoachPrompt(
+  roleComparisons: RoleComparisonEntry[],
+  matchStory: MatchStory
+): string {
+  return `You are analyzing a full 10-player Dota 2 match, not a single player. Explain what actually decided the outcome, using the submit_coaching_report tool with this framing:
+- "strengths" = which side/players had the advantage in each position matchup and why (cite the specific stat).
+- "weaknesses" = where the losing side (or an underperforming position) fell behind, cited from the position comparisons or match events.
+- "tips" = what the losing side's players could have done differently, grounded in the specific gap shown (e.g. a specific position lost net worth by a specific amount, or a specific objective/teamfight swung the game).
+- "summary" = 2-3 sentences on what decided this game overall.
+
+Position-by-position comparisons (radiant vs dire, same role):
+${JSON.stringify(roleComparisons, null, 2)}
+
+Match story - objective/teamfight timeline and momentum swings:
+${JSON.stringify(matchStory, null, 2)}`;
+}
+
+export function buildHeroCoachPrompt(performance: HeroPerformanceSummary): string {
+  return `Here is this player's performance data on their most-played hero, ${performance.heroName}: lifetime stats plus their most recent games on this specific hero. Produce a coaching report via the submit_coaching_report tool focused entirely on how to play this hero better - not general Dota advice.
+
+${JSON.stringify(performance, null, 2)}`;
 }

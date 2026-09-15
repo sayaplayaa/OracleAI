@@ -1,7 +1,20 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { CoachReport, MatchMetrics, TrendMetrics } from "../types";
+import type {
+  CoachReport,
+  MatchMetrics,
+  MatchStory,
+  RoleComparisonEntry,
+  TrendMetrics,
+} from "../types";
+import type { HeroPerformanceSummary } from "../metrics/signatureHero";
 import { coachReportTool } from "./schema";
-import { SYSTEM_PROMPT, buildMatchCoachPrompt, buildTrendCoachPrompt } from "./prompt";
+import {
+  SYSTEM_PROMPT,
+  buildHeroCoachPrompt,
+  buildMatchCoachPrompt,
+  buildMatchStoryCoachPrompt,
+  buildTrendCoachPrompt,
+} from "./prompt";
 
 let client: Anthropic | null = null;
 
@@ -45,4 +58,15 @@ export function coachMatch(metrics: MatchMetrics): Promise<CoachReport> {
 
 export function coachTrends(metrics: TrendMetrics): Promise<CoachReport> {
   return runCoach(buildTrendCoachPrompt(metrics));
+}
+
+export function coachMatchStory(
+  roleComparisons: RoleComparisonEntry[],
+  matchStory: MatchStory
+): Promise<CoachReport> {
+  return runCoach(buildMatchStoryCoachPrompt(roleComparisons, matchStory));
+}
+
+export function coachHero(performance: HeroPerformanceSummary): Promise<CoachReport> {
+  return runCoach(buildHeroCoachPrompt(performance));
 }

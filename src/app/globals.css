@@ -1,24 +1,28 @@
 @import "tailwindcss";
 
-/* Single committed dark theme (esports-stat-tool aesthetic), palette per
-   the dataviz skill's validated default: blue/orange categorical pair,
-   fixed good/critical status colors, dark chart surface. */
+/* Dense, cool-dark "stat terminal" theme (Dota2ProTracker-inspired):
+   near-black slate surfaces, a teal UI accent for interactive/selected
+   chrome, and a separate olive "top choice" highlight - distinct from the
+   chart-series palette (blue/orange/aqua), which stays as validated. */
 :root {
   color-scheme: dark;
-  --color-page: #0d0d0d;
-  --color-surface: #1a1a19;
-  --color-surface-raised: #232320;
-  --color-ink: #ffffff;
-  --color-ink-secondary: #c3c2b7;
-  --color-ink-muted: #898781;
-  --color-border: rgba(255, 255, 255, 0.1);
-  --color-grid: #2c2c2a;
-  --color-baseline: #383835;
+  --color-page: #0a0b0d;
+  --color-surface: #13151a;
+  --color-surface-raised: #1a1d24;
+  --color-ink: #f5f6f7;
+  --color-ink-secondary: #a8adb7;
+  --color-ink-muted: #6b7280;
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-grid: #23262d;
+  --color-baseline: #2b2f38;
   --color-series-blue: #3987e5;
   --color-series-orange: #d95926;
   --color-series-aqua: #199e70;
   --color-status-good: #0ca30c;
   --color-status-critical: #e66767;
+  --color-accent: #2dd4bf;
+  --color-highlight-bg: rgba(191, 161, 74, 0.14);
+  --color-highlight-text: #d9c46a;
 }
 
 @theme inline {
@@ -36,6 +40,9 @@
   --color-series-aqua: var(--color-series-aqua);
   --color-status-good: var(--color-status-good);
   --color-status-critical: var(--color-status-critical);
+  --color-accent: var(--color-accent);
+  --color-highlight-bg: var(--color-highlight-bg);
+  --color-highlight-text: var(--color-highlight-text);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -47,6 +54,6 @@ body {
 }
 
 ::selection {
-  background: var(--color-series-blue);
-  color: white;
+  background: var(--color-accent);
+  color: #06231f;
 }

@@ -45,12 +45,12 @@ export function SearchBar() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Steam ID, profile URL, or player name"
-          className="flex-1 bg-surface border border-border rounded-md px-4 py-2.5 text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-series-blue"
+          className="flex-1 bg-surface border border-border rounded-md px-4 py-2.5 text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-accent"
         />
         <button
           type="submit"
           disabled={loading || !query.trim()}
-          className="bg-series-blue hover:brightness-110 disabled:opacity-50 text-white font-medium px-5 py-2.5 rounded-md transition"
+          className="bg-accent hover:brightness-110 disabled:opacity-50 text-white font-medium px-5 py-2.5 rounded-md transition"
         >
           {loading ? "Searching..." : "Search"}
         </button>

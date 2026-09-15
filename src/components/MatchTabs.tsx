@@ -18,7 +18,7 @@ export function MatchTabs({
             onClick={() => setActive(tab.id)}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition ${
               active === tab.id
-                ? "border-series-blue text-ink"
+                ? "border-accent text-ink"
                 : "border-transparent text-ink-muted hover:text-ink"
             }`}
           >

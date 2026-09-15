@@ -1,4 +1,10 @@
-import { getHeroName, getItemKeyById } from "../constants";
+import {
+  getHeroName,
+  getItemKeyById,
+  getGameModeName,
+  getLobbyTypeName,
+  getPatchName,
+} from "../constants";
 import type {
   FarmPoint,
   FullMatchOverview,
@@ -103,6 +109,9 @@ export function computeFullMatchOverview(match: OpenDotaMatch): FullMatchOvervie
     duration: match.duration,
     radiantScore: match.radiant_score ?? null,
     direScore: match.dire_score ?? null,
+    gameMode: getGameModeName(match.game_mode),
+    lobbyType: getLobbyTypeName(match.lobby_type),
+    patch: getPatchName(match.patch),
     isParsed,
     goldAdvTrend: (match.radiant_gold_adv ?? []).map((value, minute) => ({
       minute,

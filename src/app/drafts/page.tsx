@@ -1,20 +1,36 @@
 import { getAllHeroes } from "@/lib/constants";
 import { DraftExplorer } from "@/components/DraftExplorer";
+import { MetaTierList } from "@/components/MetaTierList";
+import { MatchTabs } from "@/components/MatchTabs";
+import { PageContainer } from "@/components/PageContainer";
 
 export default function DraftsPage() {
   const heroes = getAllHeroes();
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-2">
-      <h1 className="text-xl font-bold text-ink">Draft Explorer</h1>
-      <p className="text-sm text-ink-secondary max-w-2xl mb-6">
-        Pick a hero to see its real counter-pick data from OpenDota (which
-        heroes it historically struggles against and which it dominates) and
-        its best lane partners from STRATZ (real teammate win rates for its
-        most-played position) - both by win rate across public matches, with
-        a minimum sample size per matchup.
-      </p>
-      <DraftExplorer heroes={heroes} />
-    </div>
+    <PageContainer>
+      <div className="space-y-2 mb-6">
+        <p className="text-xs font-semibold uppercase tracking-wide text-accent">
+          High-MMR Hero Explorer
+        </p>
+        <h1 className="text-2xl font-bold text-ink">Heroes</h1>
+        <p className="text-sm text-ink-secondary max-w-2xl">
+          Current-week meta by role, real counter-picks and lane synergy, and
+          a per-hero build inspector - items, talents, and role win rates -
+          all from OpenDota/STRATZ data.
+        </p>
+      </div>
+
+      <MatchTabs
+        tabs={[
+          { id: "meta", label: "Meta", content: <MetaTierList /> },
+          {
+            id: "explorer",
+            label: "Hero Explorer",
+            content: <DraftExplorer heroes={heroes} />,
+          },
+        ]}
+      />
+    </PageContainer>
   );
 }

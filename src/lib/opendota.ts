@@ -64,10 +64,18 @@ export function getWinLoss(accountId: number) {
   );
 }
 
-export function getRecentMatches(accountId: number, limit = 20) {
-  return cached(`matches:${accountId}:${limit}`, MINUTE, () =>
+export function getRecentMatches(accountId: number, limit = 20, offset = 0) {
+  return cached(`matches:${accountId}:${limit}:${offset}`, MINUTE, () =>
     request<OpenDotaRecentMatch[]>(
-      `/players/${accountId}/matches?limit=${limit}`
+      `/players/${accountId}/matches?limit=${limit}&offset=${offset}`
+    )
+  );
+}
+
+export function getMatchesForHero(accountId: number, heroId: number, limit = 20) {
+  return cached(`matches:${accountId}:hero:${heroId}:${limit}`, MINUTE, () =>
+    request<OpenDotaRecentMatch[]>(
+      `/players/${accountId}/matches?hero_id=${heroId}&limit=${limit}`
     )
   );
 }

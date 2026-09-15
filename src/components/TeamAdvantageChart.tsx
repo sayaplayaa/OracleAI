@@ -44,13 +44,13 @@ export function TeamAdvantageChart({
         <div className="flex gap-1 text-xs">
           <button
             onClick={() => setMetric("gold")}
-            className={`px-2.5 py-1 rounded ${metric === "gold" ? "bg-series-blue text-white" : "text-ink-muted hover:text-ink"}`}
+            className={`px-2.5 py-1 rounded ${metric === "gold" ? "bg-accent text-white" : "text-ink-muted hover:text-ink"}`}
           >
             Gold
           </button>
           <button
             onClick={() => setMetric("xp")}
-            className={`px-2.5 py-1 rounded ${metric === "xp" ? "bg-series-blue text-white" : "text-ink-muted hover:text-ink"}`}
+            className={`px-2.5 py-1 rounded ${metric === "xp" ? "bg-accent text-white" : "text-ink-muted hover:text-ink"}`}
           >
             XP
           </button>

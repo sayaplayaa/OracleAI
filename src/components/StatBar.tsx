@@ -3,7 +3,7 @@ import type { MetricPoint } from "@/lib/types";
 function percentileColor(pct: number): string {
   if (pct >= 75) return "var(--color-status-good)";
   if (pct <= 25) return "var(--color-status-critical)";
-  return "var(--color-series-blue)";
+  return "var(--color-accent)";
 }
 
 export function StatBar({ stat }: { stat: MetricPoint }) {

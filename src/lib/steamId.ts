@@ -27,3 +27,19 @@ export function resolveAccountId(raw: string): number | null {
   // Otherwise treat it as an already-valid Steam32/account_id.
   return asBigInt >= 0n && asBigInt <= 0xffffffffn ? Number(asBigInt) : null;
 }
+
+/**
+ * Accepts a raw Dota 2 match ID or a pasted link to it (OpenDota, Dotabuff,
+ * or this app's own /match/ URLs all end in the numeric match ID) and
+ * returns the numeric ID. Returns null if none can be found.
+ */
+export function resolveMatchId(raw: string): number | null {
+  const input = raw.trim();
+  if (!input) return null;
+
+  const match = input.match(/(\d{6,})/);
+  if (!match) return null;
+
+  const matchId = Number(match[1]);
+  return Number.isSafeInteger(matchId) && matchId > 0 ? matchId : null;
+}

@@ -1,5 +1,7 @@
 import { HeroIcon } from "./HeroIcon";
 import { ItemIcon } from "./ItemIcon";
+import { AttributeBadge } from "./AttributeBadge";
+import { getHeroPrimaryAttr } from "@/lib/constants";
 import type { FullMatchPlayer } from "@/lib/types";
 
 function TeamTable({
@@ -18,7 +20,7 @@ function TeamTable({
     <div className="overflow-x-auto">
       <table className="w-full text-sm border-collapse min-w-[720px]">
         <thead>
-          <tr className="text-xs text-ink-muted uppercase tracking-wide text-left">
+          <tr className="text-xs text-ink-muted uppercase tracking-wide text-left border-b border-border">
             <th className="py-2 pr-3 font-medium" style={{ color: accent }}>
               {team === "radiant" ? "Radiant" : "Dire"}
             </th>
@@ -41,19 +43,22 @@ function TeamTable({
             return (
               <tr
                 key={`${p.heroId}-${p.accountId ?? "anon"}`}
-                className={isFocused ? "bg-surface-raised" : undefined}
+                className={`transition-colors hover:bg-surface-raised/60 ${isFocused ? "bg-surface-raised" : ""}`}
               >
                 <td className="py-2 pr-3">
-                  <div className="flex items-center gap-2 min-w-[160px]">
+                  <div className="flex items-center gap-2 min-w-[170px]">
                     <HeroIcon heroId={p.heroId} size={32} />
                     <div className="min-w-0">
-                      <div className="text-ink font-medium truncate">
-                        {p.heroName}
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-ink font-medium truncate">
+                          {p.heroName}
+                        </span>
+                        <AttributeBadge primaryAttr={getHeroPrimaryAttr(p.heroId)} />
                       </div>
                       <div className="text-xs text-ink-muted truncate">
                         {p.personaname ?? "Anonymous"}
                         {isFocused && (
-                          <span className="text-series-blue"> · you</span>
+                          <span className="text-accent"> · you</span>
                         )}
                       </div>
                     </div>

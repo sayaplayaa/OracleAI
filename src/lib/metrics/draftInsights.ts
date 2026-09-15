@@ -1,16 +1,11 @@
 import { getHeroName } from "../constants";
 import type { DraftInsights, HeroMatchup, OpenDotaMatchupEntry } from "../types";
-import type { StratzLaneOutcome } from "../stratz";
+import { formatStratzPosition, type StratzLaneOutcome } from "../stratz";
 
 // Below this sample size a matchup's win rate is too noisy to act on.
 const MIN_GAMES_PLAYED = 20;
 const MIN_LANE_GAMES = 30;
 const LIST_SIZE = 10;
-
-function formatPosition(position: string): string {
-  const match = position.match(/POSITION_(\d)/);
-  return match ? `Position ${match[1]}` : position;
-}
 
 function computeLaneSynergy(laneSynergy: StratzLaneOutcome[]): {
   bestLanePartners: HeroMatchup[];
@@ -47,7 +42,7 @@ function computeLaneSynergy(laneSynergy: StratzLaneOutcome[]): {
     .sort((a, b) => b.winRate - a.winRate)
     .slice(0, LIST_SIZE);
 
-  return { bestLanePartners, lanePosition: formatPosition(dominantPosition) };
+  return { bestLanePartners, lanePosition: formatStratzPosition(dominantPosition) };
 }
 
 export function computeDraftInsights(
