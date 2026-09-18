@@ -6,6 +6,7 @@ import { computeMatchMetrics } from "@/lib/metrics/matchMetrics";
 import { computeFullMatchOverview } from "@/lib/metrics/fullMatchMetrics";
 import { computeRoleComparisons } from "@/lib/metrics/roleComparison";
 import { computeMatchStory } from "@/lib/metrics/matchStory";
+import { computeSkillBuild } from "@/lib/metrics/skillBuild";
 import { HeroIcon } from "@/components/HeroIcon";
 import { ItemIcon } from "@/components/ItemIcon";
 import { AttributeBadge } from "@/components/AttributeBadge";
@@ -13,7 +14,7 @@ import { StatBar } from "@/components/StatBar";
 import { StatTile } from "@/components/StatTile";
 import { AICoachPanel } from "@/components/AICoachPanel";
 import { MatchTabs } from "@/components/MatchTabs";
-import { FullMatchScoreboard } from "@/components/FullMatchScoreboard";
+import { MatchOverviewInteractive, type PlayerDetail } from "@/components/MatchOverviewInteractive";
 import { TeamAdvantageChart } from "@/components/TeamAdvantageChart";
 import { FarmSmallMultiples } from "@/components/FarmSmallMultiples";
 import { WardsMap } from "@/components/WardsMap";
@@ -59,9 +60,28 @@ export default async function MatchPage({
   const player = match.players.find((p) => p.account_id === accountId);
   if (!player) notFound();
 
-  const benchmarks = await getBenchmarks(player.hero_id).catch(() => null);
-  const metrics = computeMatchMetrics(match, accountId, benchmarks);
+  // Benchmarks are fetched once per distinct hero in the lobby so every
+  // player's detail panel (not just the page owner's) gets real percentiles.
+  const uniqueHeroIds = [...new Set(match.players.map((p) => p.hero_id))];
+  const benchmarksByHero = new Map(
+    await Promise.all(
+      uniqueHeroIds.map(
+        async (heroId) => [heroId, await getBenchmarks(heroId).catch(() => null)] as const
+      )
+    )
+  );
+
+  const metrics = computeMatchMetrics(match, accountId, benchmarksByHero.get(player.hero_id) ?? null);
   const fullMatch = computeFullMatchOverview(match);
+
+  const playerDetails: Record<number, PlayerDetail> = {};
+  for (const p of match.players) {
+    if (!p.account_id) continue;
+    playerDetails[p.account_id] = {
+      metrics: computeMatchMetrics(match, p.account_id, benchmarksByHero.get(p.hero_id) ?? null),
+      skillBuild: computeSkillBuild(p, p.hero_id),
+    };
+  }
 
   // Best-effort: STRATZ gives a real per-match position classifier, but has
   // shown intermittent failures, so a GPM-rank estimate is always the fallback.
@@ -75,9 +95,11 @@ export default async function MatchPage({
 
   const fullMatchContent = (
     <>
-      <FullMatchScoreboard
+      <MatchOverviewInteractive
         radiantPlayers={fullMatch.radiantPlayers}
         direPlayers={fullMatch.direPlayers}
+        playerDetails={playerDetails}
+        matchId={matchId}
         focusedAccountId={accountId}
       />
       {fullMatch.isParsed ? (

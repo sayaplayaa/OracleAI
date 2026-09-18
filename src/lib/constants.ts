@@ -27,6 +27,7 @@ type HeroConst = {
 type ItemConst = {
   id: number;
   dname?: string;
+  desc?: string;
   img: string;
   cost?: number;
   tier?: number;
@@ -76,6 +77,11 @@ export function getItemKeyById(itemId: number): string | null {
 
 export function getItemTier(itemKey: string): number | null {
   return itemsByKey[itemKey]?.tier ?? null;
+}
+
+/** Official item effect text, straight from Dota's own client data. */
+export function getItemDescription(itemKey: string): string {
+  return itemsByKey[itemKey]?.desc ?? "";
 }
 
 export function getAbilityNameById(abilityId: number): string | null {

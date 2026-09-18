@@ -1,3 +1,5 @@
+"use client";
+
 import { HeroIcon } from "./HeroIcon";
 import { ItemIcon } from "./ItemIcon";
 import { AttributeBadge } from "./AttributeBadge";
@@ -8,10 +10,14 @@ function TeamTable({
   players,
   team,
   focusedAccountId,
+  selectedAccountId,
+  onSelectPlayer,
 }: {
   players: FullMatchPlayer[];
   team: "radiant" | "dire";
   focusedAccountId: number | null;
+  selectedAccountId?: number | null;
+  onSelectPlayer?: (accountId: number) => void;
 }) {
   const accent =
     team === "radiant" ? "var(--color-status-good)" : "var(--color-status-critical)";
@@ -40,10 +46,14 @@ function TeamTable({
           {players.map((p) => {
             const isFocused =
               focusedAccountId !== null && p.accountId === focusedAccountId;
+            const isSelected =
+              !!selectedAccountId && p.accountId === selectedAccountId;
+            const clickable = onSelectPlayer && p.accountId !== null;
             return (
               <tr
                 key={`${p.heroId}-${p.accountId ?? "anon"}`}
-                className={`transition-colors hover:bg-surface-raised/60 ${isFocused ? "bg-surface-raised" : ""}`}
+                onClick={() => clickable && onSelectPlayer(p.accountId!)}
+                className={`transition-colors ${clickable ? "cursor-pointer hover:bg-surface-raised/60" : ""} ${isFocused ? "bg-surface-raised" : ""} ${isSelected ? "ring-1 ring-inset ring-accent" : ""}`}
               >
                 <td className="py-2 pr-3">
                   <div className="flex items-center gap-2 min-w-[170px]">
@@ -115,10 +125,14 @@ export function FullMatchScoreboard({
   radiantPlayers,
   direPlayers,
   focusedAccountId,
+  selectedAccountId,
+  onSelectPlayer,
 }: {
   radiantPlayers: FullMatchPlayer[];
   direPlayers: FullMatchPlayer[];
   focusedAccountId: number | null;
+  selectedAccountId?: number | null;
+  onSelectPlayer?: (accountId: number) => void;
 }) {
   return (
     <div className="bg-surface border border-border rounded-lg p-5 space-y-6">
@@ -126,11 +140,15 @@ export function FullMatchScoreboard({
         players={radiantPlayers}
         team="radiant"
         focusedAccountId={focusedAccountId}
+        selectedAccountId={selectedAccountId}
+        onSelectPlayer={onSelectPlayer}
       />
       <TeamTable
         players={direPlayers}
         team="dire"
         focusedAccountId={focusedAccountId}
+        selectedAccountId={selectedAccountId}
+        onSelectPlayer={onSelectPlayer}
       />
     </div>
   );

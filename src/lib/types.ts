@@ -110,6 +110,9 @@ export interface OpenDotaMatchPlayer {
   xp_t?: number[];
   lh_t?: number[];
   purchase_log?: { time: number; key: string }[];
+  // Flat, ordered list of ability ids leveled up (talent levels 10/15/20/25
+  // are excluded, not just unlabeled) - no per-entry timestamp from OpenDota.
+  ability_upgrades_arr?: number[];
   kills_log?: { time: number; key: string }[];
   runes_log?: { time: number; key: string }[];
   obs_log?: WardLogEntry[];
@@ -392,6 +395,33 @@ export interface HeroGuideReport {
   powerSpikeTips: CoachFinding[];
   teamfightTips: CoachFinding[];
   matchupTips: CoachFinding[];
+}
+
+// ---- Skill build (real, per-match ability level-up order) ----
+
+export interface SkillBuildEntry {
+  level: number;
+  abilityKey: string;
+  abilityName: string;
+  iconUrl: string;
+  // Interpolated from this player's real xp_t series against dotaconstants'
+  // official xp_level thresholds - a real-data estimate, not a logged
+  // timestamp (OpenDota doesn't record exactly when a level-up happened).
+  approxTimeSeconds: number | null;
+}
+
+// ---- Power Spike (real, per-match item/level timing coaching) ----
+
+export interface PowerSpikeMoment {
+  trigger: string; // e.g. "Battle Fury completed" or "Level 6 (ultimate unlocked)"
+  timing: string; // real or "~" interpolated time from this match, e.g. "14:32" or "~9:40"
+  why: CoachFinding;
+  whatToDo: CoachFinding;
+}
+
+export interface PowerSpikeReport {
+  summary: string;
+  moments: PowerSpikeMoment[];
 }
 
 // ---- Full match (all 10 players) ----

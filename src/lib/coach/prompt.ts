@@ -6,9 +6,18 @@ import type {
   MatchStory,
   ProHeroSpotlight,
   RoleComparisonEntry,
+  SkillBuildEntry,
   TrendMetrics,
 } from "../types";
 import type { HeroPerformanceSummary } from "../metrics/signatureHero";
+import { getItemDescription } from "../constants";
+
+function formatMatchTime(seconds: number): string {
+  if (seconds < 0) return "pre-game";
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
 
 export const SYSTEM_PROMPT = `You are an expert Dota 2 coach reviewing a student's performance data.
 
@@ -94,4 +103,41 @@ ${JSON.stringify(roleOverview, null, 2)}
 
 Real matchup data (OpenDota, all-time):
 ${JSON.stringify({ toughestMatchups: matchups.toughestMatchups, bestMatchups: matchups.bestMatchups }, null, 2)}`;
+}
+
+export function buildPowerSpikePrompt(
+  heroName: string,
+  abilities: HeroAbility[],
+  itemTimeline: { time: number; itemName: string; itemKey: string }[],
+  skillBuild: SkillBuildEntry[]
+): string {
+  const itemsWithTiming = itemTimeline.map((item) => ({
+    item: item.itemName,
+    time: formatMatchTime(item.time),
+    effect: getItemDescription(item.itemKey),
+  }));
+  const levelsWithTiming = skillBuild.map((entry) => ({
+    level: entry.level,
+    ability: entry.abilityName,
+    time: entry.approxTimeSeconds !== null ? `~${formatMatchTime(entry.approxTimeSeconds)}` : "unknown",
+  }));
+
+  return `Identify 3-5 real power-spike moments for ${heroName} in this exact match, using the submit_power_spike_report tool.
+
+A power spike is any real, specific moment from the data below - an item completing, a level reached, an ability coming online - that gives this hero a tangible, time-limited advantage over the opponent.
+
+Rules:
+- Only use triggers ("trigger"/"timing") that are literally present in the data below - never invent an item, level, or a timing not given here.
+- "why" must cite the specific item's or ability's real effect (from "effect" below, or the ability kit) - not generic hero knowledge.
+- "whatToDo" is concrete tactical advice for that exact window (a map objective, a camp/rune to take, a rotation, a fight to look for) - general Dota tactical knowledge is fine here, but it must be clearly tied to the specific trigger (e.g. "you just got X, which does Y, so go do Z now while it's live").
+- Order moments chronologically.
+
+This hero's real ability kit:
+${JSON.stringify(abilities, null, 2)}
+
+Real items purchased in this match, in order (with real timing and the item's official effect):
+${JSON.stringify(itemsWithTiming, null, 2)}
+
+Real skill build in this match, in order (timing is interpolated from real XP data, marked with ~):
+${JSON.stringify(levelsWithTiming, null, 2)}`;
 }

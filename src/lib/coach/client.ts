@@ -7,18 +7,21 @@ import type {
   HeroRoleOverview,
   MatchMetrics,
   MatchStory,
+  PowerSpikeReport,
   ProHeroSpotlight,
   RoleComparisonEntry,
+  SkillBuildEntry,
   TrendMetrics,
 } from "../types";
 import type { HeroPerformanceSummary } from "../metrics/signatureHero";
-import { coachReportTool, heroGuideTool } from "./schema";
+import { coachReportTool, heroGuideTool, powerSpikeTool } from "./schema";
 import {
   SYSTEM_PROMPT,
   buildHeroCoachPrompt,
   buildHeroGuidePrompt,
   buildMatchCoachPrompt,
   buildMatchStoryCoachPrompt,
+  buildPowerSpikePrompt,
   buildProComparisonPrompt,
   buildTrendCoachPrompt,
 } from "./prompt";
@@ -100,5 +103,17 @@ export function coachHeroGuide(
   return runCoach<HeroGuideReport>(
     buildHeroGuidePrompt(heroName, abilities, roleOverview, matchups),
     heroGuideTool
+  );
+}
+
+export function coachPowerSpike(
+  heroName: string,
+  abilities: HeroAbility[],
+  itemTimeline: { time: number; itemName: string; itemKey: string }[],
+  skillBuild: SkillBuildEntry[]
+): Promise<PowerSpikeReport> {
+  return runCoach<PowerSpikeReport>(
+    buildPowerSpikePrompt(heroName, abilities, itemTimeline, skillBuild),
+    powerSpikeTool
   );
 }

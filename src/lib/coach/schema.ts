@@ -88,3 +88,55 @@ export const heroGuideTool = {
     additionalProperties: false,
   },
 };
+
+const powerSpikeMomentSchema = {
+  type: "object",
+  properties: {
+    trigger: {
+      type: "string",
+      description:
+        "The real item, level, or timing that creates this power spike, exactly as it appears in the supplied data (e.g. 'Battle Fury completed' or 'Level 6').",
+    },
+    timing: {
+      type: "string",
+      description:
+        "The real (or '~' interpolated) in-game time this happened in this match, exactly as supplied (e.g. '14:32' or '~9:40').",
+    },
+    why: {
+      ...findingSchema,
+      description:
+        "Why this specific trigger is a power spike, citing the item/ability's real effect from the supplied data.",
+    },
+    whatToDo: {
+      ...findingSchema,
+      description:
+        "Concrete tactical advice for this exact window - where to go, what objective/camp/rune to take, what fight to look for.",
+    },
+  },
+  required: ["trigger", "timing", "why", "whatToDo"],
+  additionalProperties: false,
+};
+
+export const powerSpikeTool = {
+  name: "submit_power_spike_report",
+  description:
+    "Submit 3-5 real power-spike moments for this player's real item purchases and level-ups in this exact match - never an invented item, level, or timing.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      summary: {
+        type: "string",
+        description: "1-2 sentences on this hero's overall power curve in this match.",
+      },
+      moments: {
+        type: "array",
+        items: powerSpikeMomentSchema,
+        minItems: 3,
+        maxItems: 5,
+        description: "3-5 real power-spike moments, in chronological order.",
+      },
+    },
+    required: ["summary", "moments"],
+    additionalProperties: false,
+  },
+};

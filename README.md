@@ -88,10 +88,25 @@ once signed in, or home otherwise.
 ### Match detail (`/player/[accountId]/match/[matchId]`)
 
 Hero splash-art header, three tabs:
-- **Full Match** - scoreboard for all 10 players, team net worth/XP
-  advantage graph, per-player farm-pace sparklines, a ward-placement map,
-  and a position-density heatmap - all from OpenDota's parsed replay data.
-  Unparsed matches get a "Request full parse" button instead.
+- **Full Match** - a **net worth chart** for the whole lobby (all 10
+  players, sorted highest to lowest, real end-of-game net worth), the
+  scoreboard, team net worth/XP advantage graph, per-player farm-pace
+  sparklines, a ward-placement map, and a position-density heatmap - all
+  from OpenDota's parsed replay data. Unparsed matches get a "Request full
+  parse" button instead of the charts (the net worth chart and scoreboard
+  still work either way - net worth doesn't need a full parse).
+  Click any player (in the chart or the scoreboard) to open their **detail
+  panel**: real percentile stat bars, their real item-purchase timeline,
+  their real **skill build** (ability level-up order, with an interpolated
+  "~" timestamp derived from their real XP curve against Dota's official
+  per-level XP thresholds - OpenDota doesn't log an exact time per level-up,
+  so this is a real-data estimate, never invented), an on-demand AI
+  "mistakes & strengths" report (the same one "My Performance" uses, now
+  usable for any of the 10 players, not just your own), and a **Power
+  Spike** report: 3-5 real moments from that exact player's real item/level
+  timeline where they got a tangible edge, each explaining why (citing the
+  item/ability's real official effect) and what to actually do with that
+  window (map objective, camp, rotation).
 - **Match Story** - position-vs-position role comparisons (Radiant vs Dire
   in the same role, stat-by-stat - position comes from STRATZ's real
   per-match classifier when available, else a GPM-rank estimate, labeled
@@ -218,9 +233,12 @@ fields.
 - STRATZ's `stats` query fails outright if you pass too many hero IDs in one
   call (used for the Meta tab) - already worked around by batching in
   `getAllHeroStats`, but worth knowing if you extend it further.
-- Full-match extras (net worth graph, farm sparklines, wards, heatmap,
-  Match Story's timeline) require OpenDota to have parsed the replay; the
-  in-page "Request full parse" button handles that.
+- Full-match extras (team gold/XP advantage graph, farm sparklines, wards,
+  heatmap, item timeline, skill build, Match Story's timeline) require
+  OpenDota to have parsed the replay; the in-page "Request full parse"
+  button handles that. The net worth bar chart and scoreboard don't need a
+  parse (final net worth is basic match data), so they still work on
+  unparsed matches.
 - OpenDota's match-list endpoint doesn't always include `gold_per_min`/
   `xp_per_min` - handled as `null` (never a fabricated 0) everywhere it
   flows through.
@@ -241,6 +259,15 @@ fields.
   per-account - switching devices or browsers starts fresh. Verification
   only looks at your most recent 20 matches fetched at the time you check
   back, so a qualifying game outside that window won't be picked up.
+- **No true net-worth-over-time series**: OpenDota's public match data only
+  has end-of-game net worth per player, not a per-minute history - the Full
+  Match net worth chart is a sorted bar chart of final values (100% real),
+  not a time series, since approximating one from gold/purchases would
+  drift over a long game.
+- **Skill build timestamps are estimates**: OpenDota records which ability
+  was leveled at which real hero level, but not the exact second - the "~"
+  time is interpolated from the player's real XP curve against Dota's
+  official per-level XP thresholds, not a logged event.
 
 ## Project layout
 
@@ -248,7 +275,7 @@ fields.
 src/
   app/                        pages + API routes
     api/auth/                 Steam OpenID login/callback/session/logout
-    api/coach/                match, trends, match-story, hero, hero-guide, pro-comparison AI reports
+    api/coach/                match, trends, match-story, hero, hero-guide, pro-comparison, power-spike AI reports
     api/hero/[heroId]/        matchups, roles, build (Hero Explorer)
     api/meta/                 Heroes Meta tab
     drafts/                   Heroes page (Meta + Hero Explorer)
@@ -267,7 +294,7 @@ src/
     constants.ts, heroAbilities.ts  hero/item/rank/ability lookups (dotaconstants)
     riddles.ts, mapGuides.ts        hand-authored coaching content
     challenges.ts, challengeStorage.ts   rule-based challenge generation + localStorage
-    metrics/                        raw data -> grounded metrics (match, trend, role comparison, match story, hero build, signature hero, draft insights, pro comparison, tournaments)
+    metrics/                        raw data -> grounded metrics (match, trend, role comparison, match story, hero build, signature hero, draft insights, pro comparison, tournaments, skill build)
     coach/                           prompt + schema + Anthropic client for the AI coach
   components/                UI
 public/
