@@ -1,36 +1,43 @@
-import { getAllHeroes } from "@/lib/constants";
-import { DraftExplorer } from "@/components/DraftExplorer";
-import { MetaTierList } from "@/components/MetaTierList";
-import { MatchTabs } from "@/components/MatchTabs";
+import { Suspense } from "react";
+import type { Metadata } from "next";
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { MetaTierList, MetaTierListSkeleton } from "@/components/MetaTierList";
 import { PageContainer } from "@/components/PageContainer";
+import { PageHeader } from "@/components/PageHeader";
+import { secondaryButton } from "@/components/buttonStyles";
 
-export default function DraftsPage() {
-  const heroes = getAllHeroes();
+export const metadata: Metadata = {
+  title: "Мета - Dota Coach AI",
+};
+
+export default async function DraftsPage({ searchParams }: PageProps<"/drafts">) {
+  // The hero explorer that used to live here is now each hero's own page;
+  // old ?hero= links still land on the right build.
+  const { hero } = await searchParams;
+  const heroId = Number(hero);
+  if (Number.isInteger(heroId) && heroId > 0) redirect(`/heroes/${heroId}`);
 
   return (
-    <PageContainer>
-      <div className="space-y-2 mb-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-accent">
-          Герои на высоком MMR
-        </p>
-        <h1 className="text-2xl font-bold text-ink">Герои</h1>
-        <p className="text-sm text-ink-secondary max-w-2xl">
-          Мета этой недели по ролям, реальные контрпики и синергия на линии,
-          а для каждого героя - сборка предметов, таланты и винрейт по
-          позициям. Все данные из OpenDota и STRATZ.
-        </p>
-      </div>
-
-      <MatchTabs
-        tabs={[
-          { id: "meta", label: "Мета", content: <MetaTierList /> },
-          {
-            id: "explorer",
-            label: "Обзор героя",
-            content: <DraftExplorer heroes={heroes} />,
-          },
-        ]}
+    <PageContainer className="space-y-10">
+      <PageHeader
+        eyebrow="Живые данные · STRATZ · Легенда и выше"
+        title={
+          <>
+            Мета <span className="text-accent">этой недели</span>
+          </>
+        }
+        description="Кто сейчас реально выигрывает на каждой позиции. Нажми на героя - откроется его сборка, таланты и матчапы для этой роли."
+        aside={
+          <Link href="/heroes" className={secondaryButton}>
+            Все герои и гайды →
+          </Link>
+        }
       />
+
+      <Suspense fallback={<MetaTierListSkeleton />}>
+        <MetaTierList />
+      </Suspense>
     </PageContainer>
   );
 }

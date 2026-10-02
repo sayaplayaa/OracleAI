@@ -1,110 +1,195 @@
-import Link from "next/link";
+import Image from "next/image";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getHeroMatchups } from "@/lib/opendota";
-import { getHeroPositionStats } from "@/lib/stratz";
+import { getHeroPositionStats, getLaneSynergy } from "@/lib/stratz";
 import { getHeroAbilityKit } from "@/lib/heroAbilities";
-import { getHeroInternalName, getHeroName, getHeroPrimaryAttr } from "@/lib/constants";
+import { getAllHeroes, getHeroImage, getHeroInternalName, getHeroName, getHeroPrimaryAttr } from "@/lib/constants";
 import { computeHeroRoleOverview } from "@/lib/metrics/heroBuild";
 import { computeDraftInsights } from "@/lib/metrics/draftInsights";
+import { heroRoleTagRu } from "@/lib/heroTags";
 import { pluralRu } from "@/lib/format";
-import { HeroSplashHeader } from "@/components/HeroSplashHeader";
-import { attributeNameRu } from "@/components/AttributeBadge";
+import { attributeColor, attributeNameRu } from "@/components/AttributeBadge";
 import { HeroAbilityList } from "@/components/HeroAbilityList";
+import { HeroBuildPanel } from "@/components/HeroBuildPanel";
 import { MatchupList } from "@/components/MatchupList";
 import { HeroGuidePanel } from "@/components/HeroGuidePanel";
 import { PageContainer } from "@/components/PageContainer";
+import { BannerStat, Breadcrumbs } from "@/components/PageHeader";
+import { Tabs } from "@/components/Tabs";
+import type { RolePickStat } from "@/lib/types";
 
-export default async function HeroGuidePage({
-  params,
-}: {
-  params: Promise<{ heroId: string }>;
-}) {
-  const { heroId: heroIdParam } = await params;
-  const heroId = Number(heroIdParam);
-  if (!Number.isInteger(heroId) || heroId <= 0 || !getHeroInternalName(heroId)) {
-    notFound();
-  }
+function parseHeroId(raw: string): number | null {
+  const heroId = Number(raw);
+  return Number.isInteger(heroId) && heroId > 0 && getHeroInternalName(heroId) ? heroId : null;
+}
 
-  const abilities = getHeroAbilityKit(heroId);
-  const [positionStats, matchups] = await Promise.all([
-    getHeroPositionStats(heroId).catch(() => []),
-    getHeroMatchups(heroId),
-  ]);
-  const roleOverview = computeHeroRoleOverview(heroId, positionStats);
-  const draftInsights = computeDraftInsights(heroId, matchups);
+export async function generateMetadata({ params }: PageProps<"/heroes/[heroId]">): Promise<Metadata> {
+  const heroId = parseHeroId((await params).heroId);
+  return { title: heroId ? `${getHeroName(heroId)} - гайд и сборка - Dota Coach AI` : "Герой - Dota Coach AI" };
+}
+
+function HeroBanner({ heroId, roles }: { heroId: number; roles: RolePickStat[] }) {
+  const image = getHeroImage(heroId);
+  const attr = getHeroPrimaryAttr(heroId);
+  const color = attributeColor(attr);
+  const tags = getAllHeroes().find((h) => h.id === heroId)?.roles ?? [];
+  const totalGames = roles.reduce((s, r) => s + r.games, 0);
+  const totalWins = roles.reduce((s, r) => s + r.games * r.winRate, 0);
+  const mainRole = [...roles].sort((a, b) => b.games - a.games)[0];
+  const winRate = totalGames > 0 ? totalWins / totalGames : null;
 
   return (
-    <PageContainer>
-      <div className="space-y-6">
-        <HeroSplashHeader
-          heroId={heroId}
-          eyebrow="Гайд по герою"
-          title={getHeroName(heroId)}
-          subtitle={attributeNameRu(getHeroPrimaryAttr(heroId))}
-        >
-          <Link
-            href={`/drafts?hero=${heroId}`}
-            className="text-xs text-accent hover:underline whitespace-nowrap"
-          >
-            Полная сборка и таланты в «Обзоре героя» &rarr;
-          </Link>
-        </HeroSplashHeader>
-
-        <div>
-          <h2 className="text-sm font-semibold text-ink mb-3">Способности</h2>
-          <HeroAbilityList abilities={abilities} />
+    <div
+      className="relative overflow-hidden bg-surface border border-border rounded-2xl"
+      style={{ boxShadow: `inset 4px 0 0 0 ${color}` }}
+    >
+      {image && (
+        <div className="absolute inset-y-0 right-0 w-2/3 opacity-30 pointer-events-none" aria-hidden>
+          <Image src={image} alt="" fill className="object-cover object-center" unoptimized />
+          <div className="absolute inset-0 bg-gradient-to-r from-surface via-surface/70 to-transparent" />
         </div>
-
-        {roleOverview.roles.length > 0 && (
-          <div>
-            <h2 className="text-sm font-semibold text-ink mb-3">
-              Винрейт по ролям (эта неделя, STRATZ)
-            </h2>
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-              {roleOverview.roles.map((r) => (
-                <div
-                  key={r.position}
-                  className="rounded-lg border border-border bg-surface px-3 py-2.5"
-                >
-                  <div className="text-sm font-semibold text-ink">{r.roleLabel}</div>
-                  <div className="text-xs font-mono text-ink-muted">
-                    {r.games.toLocaleString("ru-RU")}{" "}
-                    {pluralRu(r.games, ["игра", "игры", "игр"])} ·{" "}
-                    <span
-                      style={{
-                        color:
-                          r.winRate >= 0.5
-                            ? "var(--color-status-good)"
-                            : "var(--color-status-critical)",
-                      }}
-                    >
-                      {(r.winRate * 100).toFixed(1)}%
-                    </span>
-                  </div>
-                </div>
+      )}
+      <div className="relative px-5 py-5 sm:px-7 sm:py-7 flex items-center gap-6 flex-wrap">
+        {image && (
+          <Image
+            src={image}
+            alt={getHeroName(heroId)}
+            width={192}
+            height={108}
+            className="rounded-xl border border-border shrink-0 w-[144px] sm:w-[192px] h-auto shadow-[0_20px_40px_-20px_rgba(0,0,0,0.8)]"
+            unoptimized
+            priority
+          />
+        )}
+        <div className="min-w-0">
+          <p className="font-mono text-[11px] tracking-[0.2em] uppercase mb-2 flex items-center gap-2" style={{ color }}>
+            <span className="w-2 h-2 rounded-full" style={{ background: color }} aria-hidden />
+            {attributeNameRu(attr)}
+          </p>
+          <h1 className="font-display font-bold text-3xl sm:text-4xl text-ink leading-tight">{getHeroName(heroId)}</h1>
+          {tags.length > 0 && (
+            <div className="flex gap-1.5 flex-wrap mt-3">
+              {tags.map((tag) => (
+                <span key={tag} className="text-[11px] px-2 py-0.5 rounded-full border border-border bg-page/50 text-ink-secondary">
+                  {heroRoleTagRu(tag)}
+                </span>
               ))}
             </div>
+          )}
+        </div>
+        {totalGames > 0 && (
+          <div className="flex gap-2 flex-wrap lg:ml-auto">
+            <BannerStat
+              label="Винрейт за неделю"
+              value={winRate !== null ? `${(winRate * 100).toFixed(1)}%` : "-"}
+              color={winRate !== null && winRate >= 0.5 ? "var(--color-status-good)" : "var(--color-status-critical)"}
+            />
+            <BannerStat
+              label="Игр на Легенде+"
+              value={totalGames.toLocaleString("ru-RU")}
+              sub={pluralRu(totalGames, ["игра", "игры", "игр"]) + " за неделю"}
+            />
+            {mainRole && (
+              <BannerStat
+                label="Основная роль"
+                value={mainRole.roleLabel}
+                sub={`${Math.round((mainRole.games / totalGames) * 100)}% игр`}
+              />
+            )}
           </div>
         )}
-
-        <div>
-          <h2 className="text-sm font-semibold text-ink mb-3">Матчапы</h2>
-          <div className="grid sm:grid-cols-2 gap-4">
-            <MatchupList
-              title={`Против кого ${getHeroName(heroId)} слаб`}
-              matchups={draftInsights.toughestMatchups}
-              emptyMessage="Пока ни против одного героя не набралось достаточно игр."
-            />
-            <MatchupList
-              title={`Против кого ${getHeroName(heroId)} силён`}
-              matchups={draftInsights.bestMatchups}
-              emptyMessage="Пока ни против одного героя не набралось достаточно игр."
-            />
-          </div>
-        </div>
-
-        <HeroGuidePanel heroId={heroId} />
       </div>
+    </div>
+  );
+}
+
+export default async function HeroGuidePage({ params, searchParams }: PageProps<"/heroes/[heroId]">) {
+  const heroId = parseHeroId((await params).heroId);
+  if (!heroId) notFound();
+  const { tab, pos } = await searchParams;
+
+  const abilities = getHeroAbilityKit(heroId);
+  const [positionStats, matchups, laneSynergy] = await Promise.all([
+    getHeroPositionStats(heroId).catch(() => []),
+    getHeroMatchups(heroId).catch(() => null),
+    // Optional: only with STRATZ_API_KEY; never let it break the page.
+    getLaneSynergy(heroId).catch(() => []),
+  ]);
+  const roleOverview = computeHeroRoleOverview(heroId, positionStats);
+  const draftInsights = matchups ? computeDraftInsights(heroId, matchups, laneSynergy) : null;
+  const heroName = getHeroName(heroId);
+
+  const requested = typeof pos === "string" ? pos : null;
+  const initialPosition =
+    roleOverview.roles.find((r) => r.position === requested)?.position ??
+    [...roleOverview.roles].sort((a, b) => b.games - a.games)[0]?.position ??
+    null;
+  // A ?pos= link (from the Meta page) is about the build, so open that tab.
+  const initialTab = typeof tab === "string" ? tab : requested ? "build" : undefined;
+
+  const matchupsContent = draftInsights ? (
+    <div className="grid lg:grid-cols-3 gap-4 items-start">
+      <MatchupList
+        title={`Против кого ${heroName} слаб`}
+        note="Самые неудобные противники за всё время (OpenDota)."
+        matchups={draftInsights.toughestMatchups}
+        emptyMessage="Пока ни против одного героя не набралось достаточно игр."
+        accent="var(--color-status-critical)"
+      />
+      <MatchupList
+        title={`Против кого ${heroName} силён`}
+        note="Противники, которых герой обыгрывает чаще всего."
+        matchups={draftInsights.bestMatchups}
+        emptyMessage="Пока ни против одного героя не набралось достаточно игр."
+        accent="var(--color-status-good)"
+      />
+      <MatchupList
+        title="Лучшие напарники по линии"
+        note={
+          draftInsights.lanePosition
+            ? `STRATZ, ${draftInsights.lanePosition}, только текущая неделя - живая мета.`
+            : "Синергия на линии по данным STRATZ."
+        }
+        matchups={draftInsights.bestLanePartners}
+        emptyMessage={
+          draftInsights.lanePosition
+            ? "На этой неделе ни с одним напарником не набралось достаточно игр."
+            : "Нет данных о синергии на линии (нужен ключ STRATZ_API_KEY)."
+        }
+        accent="var(--color-series-blue)"
+      />
+    </div>
+  ) : (
+    <div className="bg-surface border border-border rounded-2xl p-6 text-sm text-ink-secondary">
+      OpenDota сейчас не отдаёт матчапы этого героя. Попробуй обновить страницу через минуту.
+    </div>
+  );
+
+  return (
+    <PageContainer className="space-y-6">
+      <Breadcrumbs items={[{ href: "/", label: "Главная" }, { href: "/heroes", label: "Гайды" }, { label: heroName }]} />
+
+      <HeroBanner heroId={heroId} roles={roleOverview.roles} />
+
+      <Tabs
+        initial={initialTab}
+        tabs={[
+          {
+            id: "build",
+            label: "Сборка",
+            content: <HeroBuildPanel heroId={heroId} roles={roleOverview.roles} initialPosition={initialPosition} />,
+          },
+          {
+            id: "abilities",
+            label: "Способности",
+            badge: abilities.length || undefined,
+            content: <HeroAbilityList abilities={abilities} />,
+          },
+          { id: "matchups", label: "Матчапы", content: matchupsContent },
+          { id: "guide", label: "ИИ-гайд", content: <HeroGuidePanel heroId={heroId} heroName={heroName} /> },
+        ]}
+      />
     </PageContainer>
   );
 }

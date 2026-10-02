@@ -1,40 +1,35 @@
+import type { Metadata } from "next";
 import Link from "next/link";
-import { getAllHeroes } from "@/lib/constants";
-import { HeroIcon } from "@/components/HeroIcon";
+import { getAllHeroes, getHeroImage } from "@/lib/constants";
+import { HeroBrowser } from "@/components/HeroBrowser";
 import { PageContainer } from "@/components/PageContainer";
+import { PageHeader } from "@/components/PageHeader";
+import { secondaryButton } from "@/components/buttonStyles";
+
+export const metadata: Metadata = {
+  title: "Гайды по героям - Dota Coach AI",
+};
 
 export default function HeroesGuidesPage() {
-  const heroes = getAllHeroes();
+  const heroes = getAllHeroes().map((h) => ({ ...h, image: getHeroImage(h.id) }));
 
   return (
-    <PageContainer>
-      <div className="space-y-2 mb-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-accent">
-          Гайды по героям
-        </p>
-        <h1 className="text-2xl font-bold text-ink">Гайды</h1>
-        <p className="text-sm text-ink-secondary max-w-2xl">
-          Реальные способности каждого героя, текущий винрейт по ролям,
-          матчапы и ИИ-гайд, написанный на основе этих данных. Выбери
-          героя, чтобы начать.
-        </p>
-      </div>
-
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(72px,1fr))] gap-1.5">
-        {heroes.map((hero) => (
-          <Link
-            key={hero.id}
-            href={`/heroes/${hero.id}`}
-            title={hero.name}
-            className="flex flex-col items-center gap-1 rounded-md p-1.5 transition hover:bg-surface-raised"
-          >
-            <HeroIcon heroId={hero.id} size={36} />
-            <span className="text-[10px] text-ink-secondary text-center leading-tight line-clamp-1 w-full">
-              {hero.name}
-            </span>
+    <PageContainer className="space-y-8">
+      <PageHeader
+        eyebrow="Гайды по героям"
+        title={
+          <>
+            Выбери <span className="text-accent">героя</span>
+          </>
+        }
+        description="Сборка предметов и таланты для каждой позиции, способности, сильные и слабые матчапы и ИИ-гайд - всё на одной странице героя. Данные OpenDota и STRATZ за эту неделю."
+        aside={
+          <Link href="/drafts" className={secondaryButton}>
+            Мета этой недели →
           </Link>
-        ))}
-      </div>
+        }
+      />
+      <HeroBrowser heroes={heroes} />
     </PageContainer>
   );
 }

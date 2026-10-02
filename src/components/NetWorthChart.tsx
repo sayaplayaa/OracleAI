@@ -3,12 +3,11 @@
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { FullMatchPlayer } from "@/lib/types";
 
-const RADIANT_GREEN = "#008300";
+// Same team pair as the post-game graphs (MatchGraphs).
+const RADIANT_GREEN = "#3fa34d";
 const DIRE_RED = "#e34948";
-const GRID = "#2c2c2a";
-const MUTED = "#898781";
-const SURFACE = "#1a1a19";
-const BORDER = "rgba(255,255,255,0.1)";
+const GRID = "var(--color-grid)";
+const MUTED = "var(--color-ink-muted)";
 
 export function NetWorthChart({
   radiantPlayers,
@@ -31,10 +30,13 @@ export function NetWorthChart({
     }));
 
   return (
-    <div className="bg-surface border border-border rounded-lg p-4">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-secondary mb-3">
-        Нетворс
-      </h3>
+    <section className="bg-surface border border-border rounded-2xl p-4 sm:p-5">
+      <div className="mb-4">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-secondary">Нетворс в конце игры</h3>
+        <p className="text-xs text-ink-muted mt-1">
+          Реплей не разобран, поэтому графиков по минутам нет - только итог. Нажми на полосу, чтобы открыть игрока.
+        </p>
+      </div>
       <ResponsiveContainer width="100%" height={280}>
         <BarChart data={data} layout="vertical" margin={{ top: 0, right: 16, left: 4, bottom: 0 }}>
           <CartesianGrid stroke={GRID} horizontal={false} />
@@ -54,10 +56,15 @@ export function NetWorthChart({
             tickLine={false}
           />
           <Tooltip
-            contentStyle={{ background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 12 }}
-            labelStyle={{ color: "#f5f6f7" }}
+            contentStyle={{
+              background: "var(--color-surface-raised)",
+              border: "1px solid var(--color-border)",
+              borderRadius: 12,
+              fontSize: 12,
+            }}
+            labelStyle={{ color: "var(--color-ink)" }}
             formatter={(value) => [Number(value).toLocaleString("ru-RU"), "Нетворс"]}
-            cursor={{ fill: "rgba(255,255,255,0.04)" }}
+            cursor={{ fill: "rgba(255,214,170,0.05)" }}
           />
           <Bar
             dataKey="netWorth"
@@ -74,8 +81,8 @@ export function NetWorthChart({
                 key={i}
                 fill={d.isRadiant ? RADIANT_GREEN : DIRE_RED}
                 fillOpacity={d.accountId === selectedAccountId ? 1 : 0.7}
-                stroke={d.accountId === selectedAccountId ? "#f5f6f7" : "transparent"}
-                strokeWidth={1}
+                stroke={d.accountId === selectedAccountId ? "var(--color-accent)" : "transparent"}
+                strokeWidth={2}
               />
             ))}
           </Bar>
@@ -91,6 +98,6 @@ export function NetWorthChart({
           Dire
         </span>
       </div>
-    </div>
+    </section>
   );
 }

@@ -94,10 +94,19 @@ export function buildPowerSpikePrompt(data: PowerSpikeData): string {
 - Если время неизвестно, пиши в "timing" слово «${UNKNOWN_TIME}».
 
 Реальные покупки предметов в этом матче по порядку:
-${JSON.stringify(data.items, null, 2)}
+${JSON.stringify(data.items.map(({ item, time }) => ({ item, time })))}
+
+Официальный "effect" каждого купленного предмета (по названию; null - описания эффекта нет):
+${JSON.stringify(itemEffects(data.items))}
 
 Реальная прокачка способностей в этом матче по порядку:
-${JSON.stringify(data.levels, null, 2)}`;
+${JSON.stringify(data.levels)}`;
+}
+
+// Each effect once, not per purchase: repeated components (branches, tangos,
+// wards) would otherwise fill most of the model's context with copies.
+function itemEffects(items: EnrichedItem[]): Record<string, string | null> {
+  return Object.fromEntries(items.map((i) => [i.item, i.effect]));
 }
 
 // ---- Validation: strip any claim the model made that isn't grounded in the real data above ----

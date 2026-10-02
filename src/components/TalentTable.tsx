@@ -1,39 +1,43 @@
 import { pluralRu } from "@/lib/format";
 import type { TalentLevel, TalentOption } from "@/lib/types";
 
-function TalentCell({ option }: { option: TalentOption | undefined }) {
-  if (!option) return <div className="bg-surface" />;
-  const highlighted = option.isTopChoice || option.isHighestWin;
+function TalentCell({ option, align }: { option: TalentOption | undefined; align: "left" | "right" }) {
+  if (!option) return <div />;
 
   return (
     <div
-      className="p-3 text-center"
-      style={highlighted ? { background: "var(--color-highlight-bg)" } : undefined}
+      className={`rounded-xl border px-3.5 py-3 ${align === "left" ? "text-right" : "text-left"} ${
+        option.isTopChoice ? "border-accent/50 bg-accent/8" : "border-border bg-page/50"
+      }`}
     >
-      <div
-        className="text-sm font-semibold"
-        style={{ color: highlighted ? "var(--color-highlight-text)" : "var(--color-ink)" }}
-      >
+      <div className={`text-sm leading-snug ${option.isTopChoice ? "text-ink font-semibold" : "text-ink-secondary"}`}>
         {option.label}
       </div>
-      <div className="text-xs text-ink-muted mt-1 font-mono">
-        {option.matchCount > 0
-          ? `${option.matchCount.toLocaleString("ru-RU")} ${pluralRu(option.matchCount, ["игра", "игры", "игр"])} · винрейт ${(option.winRate * 100).toFixed(1)}%`
-          : "Нет данных"}
+      <div className="text-[11px] text-ink-muted mt-1 font-mono tabular-nums">
+        {option.matchCount > 0 ? (
+          <>
+            {option.matchCount.toLocaleString("ru-RU")} {pluralRu(option.matchCount, ["игра", "игры", "игр"])} ·{" "}
+            <span className={option.isHighestWin ? "text-status-good" : undefined}>{(option.winRate * 100).toFixed(1)}%</span>
+          </>
+        ) : (
+          "Нет данных"
+        )}
       </div>
       {(option.isTopChoice || option.isHighestWin) && (
-        <div className="text-[10px] uppercase tracking-wide text-ink-muted mt-1">
-          {option.isTopChoice && option.isHighestWin
-            ? "Чаще берут · Выше винрейт"
-            : option.isTopChoice
-              ? "Чаще берут"
-              : "Выше винрейт"}
+        <div className={`flex gap-1.5 mt-1.5 flex-wrap ${align === "left" ? "justify-end" : ""}`}>
+          {option.isTopChoice && (
+            <span className="text-[10px] uppercase tracking-wide text-accent">Чаще берут</span>
+          )}
+          {option.isHighestWin && (
+            <span className="text-[10px] uppercase tracking-wide text-status-good">Выше винрейт</span>
+          )}
         </div>
       )}
     </div>
   );
 }
 
+/** The talent tree as in game: level in the middle, left and right choice on each side. */
 export function TalentTable({ levels }: { levels: TalentLevel[] }) {
   const hasAnyData = levels.some((l) => l.options.length > 0);
   if (!hasAnyData) {
@@ -41,14 +45,14 @@ export function TalentTable({ levels }: { levels: TalentLevel[] }) {
   }
 
   return (
-    <div className="bg-surface border border-border rounded-lg overflow-hidden divide-y divide-border">
-      {levels.map((lvl) => (
-        <div key={lvl.level} className="grid grid-cols-[1fr_auto_1fr] items-stretch">
-          <TalentCell option={lvl.options[0]} />
-          <div className="flex items-center justify-center w-10 text-xs font-mono text-ink-muted bg-surface-raised">
+    <div className="space-y-2">
+      {[...levels].sort((a, b) => b.level - a.level).map((lvl) => (
+        <div key={lvl.level} className="grid grid-cols-[1fr_auto_1fr] items-stretch gap-2">
+          <TalentCell option={lvl.options[0]} align="left" />
+          <div className="flex items-center justify-center w-11 rounded-xl bg-accent/12 text-accent text-sm font-mono font-bold">
             {lvl.level}
           </div>
-          <TalentCell option={lvl.options[1]} />
+          <TalentCell option={lvl.options[1]} align="right" />
         </div>
       ))}
     </div>

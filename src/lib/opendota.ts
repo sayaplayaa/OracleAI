@@ -105,18 +105,30 @@ export function getWinLoss(accountId: number) {
   );
 }
 
+// The match list only returns a few columns unless the rest are asked for:
+// without this, GPM/XPM, last hits and lane role were missing for every game,
+// so the trends, hero and pro-comparison coaches all saw "no data" for them.
+const MATCH_LIST_PROJECTION = [
+  "match_id", "player_slot", "radiant_win", "duration", "game_mode", "lobby_type", "hero_id",
+  "start_time", "kills", "deaths", "assists", "average_rank", "party_size", "gold_per_min",
+  "xp_per_min", "last_hits", "hero_damage", "tower_damage", "hero_healing", "lane", "lane_role",
+  "is_roaming",
+]
+  .map((field) => `project=${field}`)
+  .join("&");
+
 export function getRecentMatches(accountId: number, limit = 20, offset = 0) {
-  return cached(`matches:${accountId}:${limit}:${offset}`, MINUTE, () =>
+  return cached(`matches:v2:${accountId}:${limit}:${offset}`, MINUTE, () =>
     request<OpenDotaRecentMatch[]>(
-      `/players/${accountId}/matches?limit=${limit}&offset=${offset}`
+      `/players/${accountId}/matches?limit=${limit}&offset=${offset}&${MATCH_LIST_PROJECTION}`
     )
   );
 }
 
 export function getMatchesForHero(accountId: number, heroId: number, limit = 20) {
-  return cached(`matches:${accountId}:hero:${heroId}:${limit}`, MINUTE, () =>
+  return cached(`matches:v2:${accountId}:hero:${heroId}:${limit}`, MINUTE, () =>
     request<OpenDotaRecentMatch[]>(
-      `/players/${accountId}/matches?hero_id=${heroId}&limit=${limit}`
+      `/players/${accountId}/matches?hero_id=${heroId}&limit=${limit}&${MATCH_LIST_PROJECTION}`
     )
   );
 }

@@ -1,28 +1,27 @@
+import type { ReactNode } from "react";
+
 export function StatTile({
   label,
   value,
   sub,
   accent,
+  mono = true,
 }: {
   label: string;
-  value: string;
-  sub?: string;
+  value: ReactNode;
+  sub?: ReactNode;
   accent?: string;
+  mono?: boolean;
 }) {
   return (
-    <div className="group relative bg-surface border border-border rounded-lg px-4 py-3.5 overflow-hidden transition-colors hover:border-ink-muted/40">
-      {accent && (
-        <div
-          className="absolute inset-x-0 top-0 h-0.5"
-          style={{ background: accent }}
-        />
-      )}
-      <div className="text-[11px] text-ink-muted uppercase tracking-wide font-medium">
-        {label}
-      </div>
-      <div className="text-2xl font-semibold text-ink font-mono tabular-nums mt-1.5 leading-none">
+    <div
+      className="bg-surface border border-border rounded-2xl px-4 py-3.5 transition-colors hover:border-accent/40"
+      style={accent ? { boxShadow: `inset 0 3px 0 0 ${accent}` } : undefined}
+    >
+      <p className="text-[11px] text-ink-muted uppercase tracking-wide font-medium">{label}</p>
+      <p className={`text-2xl font-semibold text-ink mt-1.5 leading-none ${mono ? "font-mono tabular-nums" : "font-display"}`}>
         {value}
-      </div>
+      </p>
       {sub && <div className="text-xs text-ink-muted mt-1.5">{sub}</div>}
     </div>
   );

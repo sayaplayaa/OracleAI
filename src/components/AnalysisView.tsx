@@ -7,6 +7,7 @@ import {
   startAnalysis,
   subscribeAnalysis,
 } from "@/lib/analysisStore";
+import { useElapsedSeconds } from "@/lib/useElapsedSeconds";
 import { SimpleReport } from "./SimpleReport";
 
 // The server request is one slow call with no real progress signal, so these
@@ -18,24 +19,11 @@ const STEPS = [
   { from: 45, text: "ИИ-тренер пишет разбор (работает на твоём компьютере)" },
 ];
 
-function subscribeToTick(callback: () => void): () => void {
-  const id = setInterval(callback, 1000);
-  return () => clearInterval(id);
-}
-
-function useElapsedSeconds(startedAt: number | null): number {
-  return useSyncExternalStore(
-    subscribeToTick,
-    () => (startedAt === null ? 0 : Math.max(0, Math.floor((Date.now() - startedAt) / 1000))),
-    () => 0
-  );
-}
-
 function LoadingCard({ startedAt }: { startedAt: number | null }) {
   const elapsed = useElapsedSeconds(startedAt);
   const current = STEPS.reduce((acc, step, i) => (elapsed >= step.from ? i : acc), 0);
   // An honest-looking bar: it follows the step guesses and never claims to be done.
-  const progress = Math.min(95, Math.round((elapsed / 120) * 100));
+  const progress = Math.min(95, Math.round((elapsed / 180) * 100));
 
   return (
     <div className="space-y-6" aria-live="polite">
@@ -43,7 +31,9 @@ function LoadingCard({ startedAt }: { startedAt: number | null }) {
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
             <h2 className="font-display font-bold text-lg text-ink">Разбираю твою игру…</h2>
-            <p className="text-sm text-ink-muted mt-1">Обычно это 1-2 минуты. Страницу можно не закрывать.</p>
+            <p className="text-sm text-ink-muted mt-1">
+              Обычно это 1-3 минуты, на слабой видеокарте - до 5. Страницу можно не закрывать.
+            </p>
           </div>
           <p className="text-xs text-ink-muted font-mono tabular-nums">Прошло {elapsed} с</p>
         </div>

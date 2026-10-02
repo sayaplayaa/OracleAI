@@ -10,35 +10,33 @@ export function StatBar({ stat }: { stat: MetricPoint }) {
   const percentile = stat.percentile;
 
   return (
-    <div className="py-2">
+    <div className="py-2.5">
       <div className="flex items-baseline justify-between gap-2 mb-1.5">
         <span className="text-sm text-ink-secondary">{stat.label}</span>
         <span className="text-sm font-mono text-ink tabular-nums">
           {typeof stat.value === "number" ? stat.value.toLocaleString("ru-RU") : stat.value}
-          {stat.unit ? (
-            <span className="text-ink-muted ml-1">{stat.unit}</span>
-          ) : null}
+          {stat.unit ? <span className="text-ink-muted ml-1">{stat.unit}</span> : null}
         </span>
       </div>
       {typeof percentile === "number" && (
         <>
-          <div className="relative h-1.5 rounded-full bg-baseline overflow-hidden">
+          <div className="relative h-2 rounded-full bg-page overflow-hidden">
             <div
               className="absolute inset-y-0 left-0 rounded-full"
-              style={{
-                width: `${Math.max(4, percentile)}%`,
-                background: percentileColor(percentile),
-              }}
+              style={{ width: `${Math.max(4, percentile)}%`, background: percentileColor(percentile) }}
             />
-            <div className="absolute inset-y-0 left-1/2 w-px bg-ink-muted/40" />
+            <div className="absolute inset-y-0 left-1/2 w-px bg-ink-muted/50" title="Медиана" />
           </div>
-          <div className="flex justify-between mt-1">
-            <span className="text-xs text-ink-muted">
-              {percentile}-й перцентиль на этом герое
+          <div className="flex justify-between mt-1 text-[11px] text-ink-muted">
+            <span>
+              <span className="font-mono" style={{ color: percentileColor(percentile) }}>
+                {percentile}
+              </span>
+              -й перцентиль
             </span>
             {stat.benchmarkMedian !== undefined && (
-              <span className="text-xs text-ink-muted">
-                медиана {stat.benchmarkMedian.toLocaleString("ru-RU")}
+              <span>
+                медиана <span className="font-mono">{stat.benchmarkMedian.toLocaleString("ru-RU")}</span>
               </span>
             )}
           </div>

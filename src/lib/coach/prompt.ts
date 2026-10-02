@@ -37,9 +37,9 @@ export const SYSTEM_PROMPT = `Ты - опытный тренер по Dota 2, к
 
 Правила:
 - Рассуждай только на основе данных JSON, которые тебе даны. Никогда не придумывай способности героев, матчапы или события, которых нет в цифрах.
-- Каждая сильная сторона, слабость и совет должны в поле "metric" ссылаться на конкретное поле/значение из данных (например: «Золото в минуту 412, 35-й перцентиль» или «Нетворс на 10-й минуте 2100»).
+- Каждая сильная сторона, слабость и совет должны в поле "metric" ссылаться на конкретное поле/значение из данных (например: «Золото в минуту N» или «Нетворс на 10-й минуте N», где N - точное число из данных). Перцентили, сравнения и числа приводи, только если они есть в данных.
 - Если есть перцентиль, используй его, чтобы понять, хороший это показатель для героя или плохой, а не гадай по сырому числу.
-- Никогда не повторяй игроку просто число - он и так видит статистику на экране. Твоя задача - связать причину и следствие (почему показатель такой) и превратить это в конкретную инструкцию, что делать иначе. Пункт «Золото в минуту было 412» бесполезен; «Фарм застрял на 412 золота в минуту (35-й перцентиль), потому что смерти на 6:40 и 14:10 стоили двух волн - ставь вард на лагерь для пулла, прежде чем идти туда» - вот уровень.
+- Никогда не повторяй игроку просто число - он и так видит статистику на экране. Твоя задача - связать причину и следствие (почему показатель такой) и превратить это в конкретную инструкцию, что делать иначе. Пункт «Золото в минуту было N» бесполезен; «Фарм застрял на N золота в минуту, потому что смерти на ММ:СС и ММ:СС стоили двух волн - ставь вард на лагерь для пулла, прежде чем идти туда» - вот уровень (N и ММ:СС - реальные числа и время из данных, не из этого примера).
 - Ставь диагноз уверенно. Не пиши «возможно», «вероятно», «это может указывать», когда данные позволяют сказать прямо: «ты умер, потому что X», «в следующий раз делай Y».
 - Советы должны быть конкретными и выполнимыми (что изменить, а не только что пошло не так).
 - Тон - прямой, подбадривающий и привязанный к этим данным, а не общие советы по Dota.
@@ -104,10 +104,32 @@ export function buildMatchStoryCoachPrompt(
 - "summary" = 2-3 предложения о том, что в целом решило эту игру.
 
 Сравнение по позициям (Силы Света против Сил Тьмы, одна и та же роль; radiant = Силы Света, dire = Силы Тьмы):
-${JSON.stringify(roleComparisons, null, 2)}
+${JSON.stringify(roleComparisons.map(compactRoleComparison))}
 
 История матча - хронология целей и драк, переломные моменты:
-${JSON.stringify(matchStory, null, 2)}`;
+${JSON.stringify(matchStory)}`;
+}
+
+// A comparison entry carries both full player records (per-minute series,
+// ward logs, position heatmaps) - hundreds of thousands of characters that
+// would push everything else out of the model's context. The comparison
+// itself only needs who played what and the compared numbers.
+function compactRoleComparison(entry: RoleComparisonEntry) {
+  const player = (p: RoleComparisonEntry["radiant"]) => ({
+    hero: p.heroName,
+    kda: `${p.kills}/${p.deaths}/${p.assists}`,
+    netWorth: p.netWorth,
+    level: p.level,
+  });
+  return {
+    position: entry.position,
+    positionConfirmed: entry.positionConfirmed,
+    radiant: player(entry.radiant),
+    dire: player(entry.dire),
+    stats: entry.stats,
+    radiantStatsWon: entry.radiantStatsWon,
+    direStatsWon: entry.direStatsWon,
+  };
 }
 
 export function buildHeroCoachPrompt(performance: HeroPerformanceSummary): string {
@@ -126,11 +148,30 @@ export function buildProComparisonPrompt(
 - "tips" = конкретные изменения, которые помогут сократить эти разрывы, исходя из конкретного разрыва (а не общие советы по герою).
 - "summary" = 2-3 предложения о самом главном, что стоит взять из игр про на этом герое.
 
+Сравнение по показателям (уже посчитано - не меняй направление сравнения):
+${proComparisonLines(userPerformance, proSpotlight).join("\n")}
+
 Данные игрока на ${userPerformance.heroName}:
-${JSON.stringify(userPerformance, null, 2)}
+${JSON.stringify(userPerformance)}
 
 Данные ${proSpotlight.pro.name} на ${proSpotlight.heroName} (его последние игры на этом герое):
-${JSON.stringify(proSpotlight, null, 2)}`;
+${JSON.stringify({ ...proSpotlight, leagueGames: proSpotlight.leagueGames.map(({ win, kills, deaths, assists, leagueName }) => ({ win, kda: `${kills}/${deaths}/${assists}`, leagueName })) })}`;
+}
+
+// The model reliably got the direction of a gap wrong (657 GPM against 552
+// written as "you earn less"), so each comparison is stated outright.
+function proComparisonLines(user: HeroPerformanceSummary, pro: ProHeroSpotlight): string[] {
+  const rows: [string, number | null, number | null, (v: number) => string][] = [
+    ["Винрейт", user.recentGames > 0 ? user.recentWinRate : null, pro.games > 0 ? pro.winRate : null, (v) => `${Math.round(v * 100)}%`],
+    ["Средний KDA", user.recentGames > 0 ? user.avgKda : null, pro.avgKda, (v) => v.toLocaleString("ru-RU")],
+    ["Золото в минуту", user.avgGpm, pro.avgGpm, (v) => String(Math.round(v))],
+    ["Опыт в минуту", user.avgXpm, pro.avgXpm, (v) => String(Math.round(v))],
+  ];
+  return rows.map(([label, mine, theirs, format]) => {
+    if (mine === null || theirs === null) return `- ${label}: нет данных для сравнения`;
+    const verdict = mine > theirs ? "у игрока БОЛЬШЕ, чем у про" : mine < theirs ? "у игрока МЕНЬШЕ, чем у про" : "одинаково";
+    return `- ${label}: игрок ${format(mine)}, ${pro.pro.name} ${format(theirs)} - ${verdict}`;
+  });
 }
 
 export function buildHeroGuidePrompt(
@@ -150,11 +191,26 @@ export function buildHeroGuidePrompt(
 - Названия героев, способностей и предметов оставляй как в данных (по-английски).
 
 Реальный набор способностей (официальные данные игры):
-${JSON.stringify(abilities, null, 2)}
+${JSON.stringify(abilities.map(compactAbility))}
 
 Реальные винрейты по ролям (текущая неделя, STRATZ):
-${JSON.stringify(roleOverview, null, 2)}
+${JSON.stringify(roleOverview.roles)}
 
 Реальные данные по матчапам (OpenDota, за всё время):
-${JSON.stringify({ toughestMatchups: matchups.toughestMatchups, bestMatchups: matchups.bestMatchups }, null, 2)}`;
+${JSON.stringify({ toughestMatchups: matchups.toughestMatchups.map(compactMatchup), bestMatchups: matchups.bestMatchups.map(compactMatchup) })}`;
+}
+
+// Only what the guide is written from: the English original description is
+// for the app's own keyword checks and the icon is for the page.
+function compactAbility(a: HeroAbility) {
+  return {
+    name: a.name,
+    ...(a.isInnate ? { innate: true } : {}),
+    description: a.description,
+    values: Object.fromEntries(a.attributes.map((attr) => [attr.header, attr.value])),
+  };
+}
+
+function compactMatchup(m: DraftInsights["bestMatchups"][number]) {
+  return { hero: m.heroName, games: m.gamesPlayed, winRate: `${Math.round(m.winRate * 100)}%` };
 }

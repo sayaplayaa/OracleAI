@@ -33,13 +33,23 @@ Open http://localhost:3000.
   `OLLAMA_URL`/`OLLAMA_MODEL` in `.env.local`). Without it, all stats/trends/
   pages still work, but every "AI Coach" / "Get tips" / "Get AI Trend Report"
   action returns an error.
+  - **Context window.** Each request gets the smallest window its prompt and
+    answer fit in (4096 or 8192 tokens, capped by `OLLAMA_NUM_CTX`), so a
+    prompt is never silently cut - Ollama would drop its start, the rules.
+  - **8 GB GPUs.** `qwen3:8b` with an 8192 window may not fit next to the
+    desktop, browser and other GPU apps. When Ollama's own placement fails
+    to load, the app retries with part of the layers on the CPU (24, then
+    16, then 8 on the GPU) and remembers what worked - reports then take a
+    few minutes instead of under one. `OLLAMA_NUM_GPU` pins the layer count;
+    a smaller model (`ollama pull qwen3:4b`, `OLLAMA_MODEL=qwen3:4b`) keeps
+    everything on the GPU at some cost in report quality.
 - **`SESSION_SECRET`** (required for Steam login) - any long random string
   used to sign the session cookie, e.g. `openssl rand -hex 32`. It's a local
   secret, not a third-party credential.
 - **`STRATZ_API_KEY`** (optional but recommended) - from https://stratz.com/api.
-  Powers the Heroes page's Meta tab and Build Inspector, per-match role
-  classification on Match Story, and Draft Explorer's lane-partner section.
-  Without it those are omitted (Meta tab, item builds/talents, lane partners)
+  Powers the Meta page, the build tab and lane partners on hero pages, and
+  per-match role classification on Match Story.
+  Without it those are omitted (Meta, item builds/talents, lane partners)
   or fall back to an estimate (role comparisons use a GPM-rank heuristic
   instead of STRATZ's real classifier) - OpenDota-backed features are
   unaffected.
@@ -60,23 +70,33 @@ The UI is built around four steps, in Russian, with nothing else on screen:
    starts immediately (no button): the same grounded match analysis as
    before (phase-by-phase, compared only with the enemy player on the same
    position), laid out as *summary -> what to fix first -> what went well ->
-   how each phase went -> details*. It takes 1-2 minutes on the local model,
-   so the page shows progress; finished analyses are cached (server memory
+   how each phase went -> details*. It takes 1-3 minutes on the local model
+   (up to ~5 on an 8 GB GPU, see Setup), so the page shows progress; finished
+   analyses are cached (server memory
    for 6 h, and `localStorage` on the device) so reopening a game is instant.
 4. **Подробная статистика** - a button on the analysis page that opens the
    full data view of that match (`/player/[accountId]/match/[matchId]`).
 
-Everything built before stays, as the **Расширенный режим** (`/advanced`,
-linked from the header): Heroes, Guides, Tournaments, Challenges, Riddles,
-the full player profile and the search bar. Pages in that mode get the full
-header; the simple pages get a bare one. The floating AI Coach button is
-hidden on the simple pages (the analysis is the page itself there) and stays
-on the advanced ones.
+Everything else is in the header on every page: Meta, Guides, Tournaments,
+Challenges, Riddles, the full player profile and the search bar
+(`/advanced` lists the same tools). The floating AI Coach button is hidden
+on the home and analysis pages (the analysis is the page itself there) and
+shown everywhere else.
 
-The AI report text itself is still English (the analysis facts, principles and
-model prompts are English); only the surrounding interface is Russian.
+AI reports are written in Russian; hero, item and ability names stay in
+English, as in the game client.
+
+Every section page shares one visual language with the home page: a page
+header (mono eyebrow, display title), rounded cards with a colored top edge,
+segmented tabs whose state is kept in the URL (`?tab=`), and the same AI
+action card everywhere an AI report can be requested (it shows elapsed time
+while the local model works).
 
 ### Player profile (`/player/[accountId]`)
+
+A banner with the avatar, lifetime wins/losses and, on your own profile,
+"analyze my last game" / "my games" buttons; on your own profile every game
+row also has a **Разбор** button straight into `/analysis/[matchId]`.
 
 **Overview** tab:
 - Win rate, average KDA, **Rank** and **MMR** - derived from OpenDota's
@@ -106,19 +126,21 @@ model prompts are English); only the surrounding interface is Russian.
 - **Get AI Trend Report** - sends the last 20 games' aggregated stats to the
   local model for a pattern-level report.
 
-**Match History** tab: the full match list, paginated ("Load more").
+**Match History** tab: the full match list with a wins/losses filter,
+paginated ("Load more").
 
 ### Match detail (`/player/[accountId]/match/[matchId]`)
 
-Hero splash-art header, three tabs:
-- **Full Match** - a **net worth chart** for the whole lobby (all 10
-  players, sorted highest to lowest, real end-of-game net worth), the
-  scoreboard, team net worth/XP advantage graph, per-player farm-pace
-  sparklines, a ward-placement map, and a position-density heatmap - all
-  from OpenDota's parsed replay data. Unparsed matches get a "Request full
-  parse" button instead of the charts (the net worth chart and scoreboard
-  still work either way - net worth doesn't need a full parse).
-  Click any player (in the chart or the scoreboard) to open their **detail
+A banner with the team score, duration, mode and patch, the profile player's
+hero and result, and - on your own game - a button into the AI analysis.
+Three tabs:
+- **Full Match** - Dota-style post-game graphs (team gold/XP advantage,
+  per-player net worth/XP/last hits/denies), a scoreboard per team with team
+  totals, one ward map filterable by ward type, side and game phase, and a
+  position-density heatmap - all from OpenDota's parsed replay data.
+  Unparsed matches get a "Request full parse" card (with a progress bar)
+  and an end-of-game net worth bar chart instead of the per-minute graphs.
+  Click any player (in the graphs or the scoreboard) to open their **detail
   panel**: real percentile stat bars, their real item-purchase timeline,
   their real **skill build** (ability level-up order, with an interpolated
   "~" timestamp derived from their real XP curve against Dota's official
@@ -137,8 +159,8 @@ Hero splash-art header, three tabs:
   teamfight, biggest momentum swing - all from data already in the match
   fetch), and a "What decided this game?" AI report.
 - **My Performance** - percentile bars against OpenDota's hero benchmarks,
-  key item timeline. Personal AI coaching now lives in the floating widget
-  (see below) rather than a button on this tab.
+  key item timeline, and either a link into the full analysis (your own
+  game) or the match AI report (anyone else's).
 
 ### Floating AI Coach (every page)
 
@@ -147,48 +169,48 @@ match and your account; elsewhere it asks for a match ID/link (and your
 Steam ID if you're not signed in), then produces the same grounded personal
 match report as before.
 
-### Heroes (`/drafts`)
+### Meta (`/drafts`)
 
-Two tabs:
-- **Meta** - current-week pick/win rate for every hero, filterable by role
-  (STRATZ, batched query - see limitations).
-- **Hero Explorer** - pick a hero for a real Build Inspector (role win-rate
-  pills, starting items, item timing progression, situational items, neutral
-  items by tier, talent picks with "Most picked"/"Highest win", all from
-  STRATZ's current-week data) plus counter-pick data from OpenDota and
-  lane-partner synergy from STRATZ, under "Matchups."
+This week's strongest heroes per position (STRATZ, Legend and above,
+batched query - see limitations), rendered on the server: the leader of
+each position as a card, then the top 8 per position with a win-rate bar
+centered on 50%. Every hero links to its page with the build for that
+position open (`/heroes/{id}?pos=POSITION_N`). Old `/drafts?hero={id}` links
+redirect to the hero page.
 
-Every ranked list here (Meta tier list, toughest/best matchups, best lane
-partners) is sorted by a Wilson score confidence interval, not raw win rate -
-a hero at 100% over 3 games no longer outranks one at 58% over 5,000, and a
-hero rarely played in a role (e.g. Anti-Mage as Hard Support) doesn't get
-inflated by a tiny lucky sample.
+Every ranked list (meta, toughest/best matchups, best lane partners) is
+sorted by a Wilson score confidence interval, not raw win rate - a hero at
+100% over 3 games no longer outranks one at 58% over 5,000, and a hero rarely
+played in a role (e.g. Anti-Mage as Hard Support) doesn't get inflated by a
+tiny lucky sample.
 
 ### Guides (`/heroes`, `/heroes/[heroId]`)
 
-A per-hero reference page, distinct from the Heroes/`/drafts` stats hub
-above:
-- **Ability kit** - every real ability (name, official description,
-  numeric attributes, icon), straight from `dotaconstants`' game-client
-  data. No fetch, no fabrication - it's always present.
-- **Role win rates** and **matchups** - the same STRATZ/OpenDota data shown
-  in Hero Explorer, reused here rather than recomputed, with a link back to
-  the full Build Inspector for that hero (`/drafts?hero={id}`, which now
-  deep-links Hero Explorer to a preselected hero).
-- **AI hero guide** - a written guide (laning, power spikes, teamfighting,
-  matchups) grounded in the real ability kit and stats above, via its own
-  forced-tool-use schema (separate from personal coaching - this is general
-  hero knowledge, not about any one player's performance).
+`/heroes` is the hero grid grouped by primary attribute, as in the game,
+with search and attribute/role filters. Each hero page has a banner (week
+win rate, games, main role) and four tabs:
+- **Build** - role picker (win rate and share of games per position), then
+  the real STRATZ current-week build for that position: starting items, core
+  items in order with average timings, talents (most picked / highest win
+  rate), situational items and neutral items by tier.
+- **Abilities** - every real ability (name, official description, numeric
+  attributes, icon), straight from `dotaconstants`' game-client data.
+- **Matchups** - toughest and easiest opponents (OpenDota) and best lane
+  partners (STRATZ).
+- **AI guide** - a written guide (laning, power spikes, teamfighting,
+  matchups) grounded in the real ability kit and stats, via its own
+  structured-output schema (general hero knowledge, not one player's games).
 
 ### Tournaments (`/tournaments`)
 
 Real competitive Dota, not personal stats:
 - **Live now** - currently-live tournament games (OpenDota's live-match feed
-  filtered to ones with a real `league_id`), shown only when something
-  actually is live - OpenDota tracks live pro games sparsely, so this
-  section is simply absent otherwise rather than showing a placeholder.
+  filtered to ones with a real `league_id`) as scoreboards. OpenDota keeps
+  games in that feed for a while after they end, so anything already in the
+  results list is left out of "live".
 - **Recent results** - real finished league/tournament matches (teams,
-  final score, league name), filterable by league, each linking to a full
+  final score, league name), grouped by league, with team/league search and
+  league chips, each linking to a full
   match breakdown via `/matches/[matchId]` (a new account-less entry point
   that resolves a real participant from the match and forwards to the
   existing match page - also used now by the header search for match-ID
@@ -205,18 +227,22 @@ average. Deliberately rule-based rather than AI-generated, since these are
 precise numeric thresholds where a model could plausibly invent a
 slightly-wrong number. A challenge only completes when a real subsequent
 match actually clears the bar (checked against freshly fetched matches, not
-self-reported) and links to that match. Progress is saved in
-`localStorage`, tied to this browser rather than your account - there's no
-database, consistent with the rest of the app.
+self-reported) and links to that match. Each card shows "now -> goal" in the
+challenge's own units, next to a strip of your current form. Progress is
+saved in `localStorage`, tied to this browser rather than your account -
+there's no database, consistent with the rest of the app.
 
 ### Dota Riddles (`/riddles`)
 
 Scenario-based, multiple-choice questions on map awareness, vision, timing,
 and decision-making (hand-authored coaching content, not tied to any match),
-each with a real explanation. Alongside it, a **Map Guide**: your real Dota 2
-minimap with an Early/Mid/Late game-phase selector, marking ward spots, farm
-priorities, and objectives per phase (hand-authored guidance, marker
-positions calibrated by eye against real map landmarks).
+each with a real explanation. A round asks every riddle once in random
+order; answers can be given with keys 1-4 / A-D and Enter moves on; score,
+streak and accuracy are shown, with a summary at the end. Alongside it, a
+**Map Guide**: your real Dota 2 minimap with an Early/Mid/Late game-phase
+selector and numbered markers for ward spots, farm priorities, and
+objectives per phase (hand-authored guidance, marker positions calibrated by
+eye against real map landmarks).
 
 The AI is never given free rein: every coach entry point sends a structured
 JSON object of already-computed metrics and gets back a structured report
@@ -245,16 +271,15 @@ strength/weakness/tip cites one of those fields.
   `lane_pos` field, not a real path trail - OpenDota's public API doesn't
   expose full positional replay data. The ward map similarly plots real
   `obs_log`/`sen_log` coordinates on a relative grid, not a map image.
-- Draft Explorer's lane-partner section and the Heroes Meta/Build Inspector
-  tabs require `STRATZ_API_KEY`; without one they're omitted rather than
-  approximated.
+- The Meta page, hero builds and lane partners require `STRATZ_API_KEY`;
+  without one they're omitted rather than approximated.
 - STRATZ ties API keys to the IP address they were issued from. A
   "different IP Addresses" (403) error means the machine's outbound IP has
   changed since the key was generated - regenerate it at stratz.com/api.
   **On a VPN, this recurs every time the VPN rotates its exit IP** - no
   app-side fix, it's inherent to how STRATZ issues keys.
 - STRATZ's `stats` query fails outright if you pass too many hero IDs in one
-  call (used for the Meta tab) - already worked around by batching in
+  call (used for the Meta page) - already worked around by batching in
   `getAllHeroStats`, but worth knowing if you extend it further.
 - Full-match extras (team gold/XP advantage graph, farm sparklines, wards,
   heatmap, item timeline, skill build, Match Story's timeline) require
@@ -299,10 +324,10 @@ src/
   app/                        pages + API routes
     api/auth/                 Steam OpenID login/callback/session/logout
     api/coach/                match, trends, match-story, hero, hero-guide, pro-comparison, power-spike AI reports
-    api/hero/[heroId]/        matchups, roles, build (Hero Explorer)
-    api/meta/                 Heroes Meta tab
-    drafts/                   Heroes page (Meta + Hero Explorer)
-    heroes/, heroes/[heroId]/ Guides (ability kit + AI hero guide)
+    api/hero/[heroId]/        matchups, roles, build (hero page Build tab)
+    api/meta/                 meta tier list as JSON
+    drafts/                   Meta page (tier list per position)
+    heroes/, heroes/[heroId]/ hero grid + hero page (build, abilities, matchups, AI guide)
     tournaments/              Tournament Tracker (live + recent results)
     matches/[matchId]/        account-less match entry point (redirects)
     challenges/               Training Challenges

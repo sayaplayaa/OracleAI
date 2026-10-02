@@ -9,12 +9,13 @@ export const findingSchema = {
   properties: {
     point: {
       type: "string",
-      description: "Наблюдение или совет тренера простыми словами, на русском языке.",
+      description:
+        "Сам вывод или совет тренера полным предложением на русском. Не название показателя (не «avgKda», не «Золото в минуту»).",
     },
     metric: {
       type: "string",
       description:
-        "Точное название показателя и его значение из данных, на которых основан пункт, на русском (например: «Золото в минуту 412, 35-й перцентиль для Pudge»).",
+        "Показатель из данных, на котором основан пункт, по-русски и с точным числом из данных (например: «Золото в минуту N против M у соперника», где N и M - числа из данных). Не добавляй чисел, перцентилей и сравнений, которых нет в данных.",
     },
   },
   required: ["point", "metric"],
@@ -35,16 +36,19 @@ export const coachReportTool = {
       strengths: {
         type: "array",
         items: findingSchema,
+        maxItems: 4,
         description: "Что игрок сделал хорошо, каждый пункт подкреплён показателем.",
       },
       weaknesses: {
         type: "array",
         items: findingSchema,
+        maxItems: 4,
         description: "Что мешало игроку, каждый пункт подкреплён показателем.",
       },
       tips: {
         type: "array",
         items: findingSchema,
+        maxItems: 4,
         description: "Конкретные выполнимые советы, связанные с найденными слабостями.",
       },
     },
@@ -151,21 +155,29 @@ export const heroGuideTool = {
       laningTips: {
         type: "array",
         items: findingSchema,
+        minItems: 2,
+        maxItems: 4,
         description: "Как играть линию на этом герое, каждый пункт основан на реальной способности или стартовом предмете.",
       },
       powerSpikeTips: {
         type: "array",
         items: findingSchema,
+        minItems: 2,
+        maxItems: 4,
         description: "Реальные пики силы по предметам/уровням, вокруг которых стоит играть, каждый со ссылкой на конкретный предмет или тайминг.",
       },
       teamfightTips: {
         type: "array",
         items: findingSchema,
+        minItems: 2,
+        maxItems: 4,
         description: "Как использовать способности героя в тимфайтах, каждый пункт со ссылкой на конкретный эффект способности.",
       },
       matchupTips: {
         type: "array",
         items: findingSchema,
+        minItems: 3,
+        maxItems: 5,
         description: "Что делать против реально сложных/удобных соперников, каждый пункт с винрейтом матчапа.",
       },
     },

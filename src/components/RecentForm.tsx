@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { HeroIcon } from "./HeroIcon";
-import { pluralRu } from "@/lib/format";
 import type { TrendMatchSummary } from "@/lib/types";
 
+/** Last games as a strip of hero icons, oldest on the left like a form guide. */
 export function RecentForm({
   accountId,
   matches,
@@ -12,33 +12,39 @@ export function RecentForm({
 }) {
   const wins = matches.filter((m) => m.win).length;
   const losses = matches.length - wins;
+  const ordered = [...matches].reverse();
 
   return (
-    <div className="bg-surface border border-border rounded-lg p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-secondary">
-          Последние игры
-        </h3>
-        <span className="text-xs font-mono text-ink-muted">
-          {wins} {pluralRu(wins, ["победа", "победы", "побед"])} - {losses}{" "}
-          {pluralRu(losses, ["поражение", "поражения", "поражений"])}
+    <section className="bg-surface border border-border rounded-2xl p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="font-display font-bold text-base text-ink">Форма</h3>
+        <span className="text-xs font-mono tabular-nums">
+          <span className="text-status-good">{wins}</span>
+          <span className="text-ink-muted"> - </span>
+          <span className="text-status-critical">{losses}</span>
+          <span className="text-ink-muted"> за {matches.length}</span>
         </span>
       </div>
-      <div className="flex flex-wrap gap-1.5">
-        {matches.map((m) => (
+      <div className="grid grid-cols-10 gap-1">
+        {ordered.map((m) => (
           <Link
             key={m.matchId}
             href={`/player/${accountId}/match/${m.matchId}`}
             title={`${m.heroName} - ${m.win ? "Победа" : "Поражение"} (${m.kills}/${m.deaths}/${m.assists})`}
-            className="rounded-md p-0.5"
-            style={{
-              border: `1.5px solid ${m.win ? "var(--color-status-good)" : "var(--color-status-critical)"}`,
-            }}
+            className="group flex flex-col items-center gap-1"
           >
-            <HeroIcon heroId={m.heroId} size={30} />
+            <span className="rounded-md overflow-hidden ring-1 ring-border group-hover:ring-accent transition">
+              <HeroIcon heroId={m.heroId} size={28} />
+            </span>
+            <span
+              className="w-full h-1 rounded-full"
+              style={{ background: m.win ? "var(--color-status-good)" : "var(--color-status-critical)" }}
+              aria-hidden
+            />
           </Link>
         ))}
       </div>
-    </div>
+      <p className="text-[11px] text-ink-muted mt-3">Слева - старые, справа - самая свежая игра.</p>
+    </section>
   );
 }

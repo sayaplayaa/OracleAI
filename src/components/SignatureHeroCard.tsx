@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getHeroImage } from "@/lib/constants";
 import { pluralRu } from "@/lib/format";
 import { TiltCard } from "./TiltCard";
@@ -17,46 +18,38 @@ export function SignatureHeroCard({
   winRate: number;
 }) {
   const image = getHeroImage(heroId);
+  const color = winRate >= 0.5 ? "var(--color-status-good)" : "var(--color-status-critical)";
 
   return (
     <div className="space-y-3">
-      <TiltCard className="relative rounded-xl overflow-hidden border border-border aspect-square">
+      <TiltCard maxTilt={6} className="relative rounded-2xl overflow-hidden border border-border aspect-[16/10]">
         <div
-          className="absolute inset-0 bg-cover bg-center scale-125"
+          className="absolute inset-0 bg-cover bg-center scale-110"
           style={{ backgroundImage: image ? `url(${image})` : undefined }}
         />
-        <div
-          className="absolute inset-0"
-          style={{
-            background:
-              "linear-gradient(180deg, rgba(10,11,13,0.1) 0%, rgba(10,11,13,0.6) 65%, var(--color-page) 100%)",
-          }}
-        />
-        <div className="relative h-full flex flex-col justify-end p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-accent mb-1">
-            Сигнатурный герой
-          </p>
-          <h3 className="text-xl font-bold text-ink drop-shadow">{heroName}</h3>
-          <p className="text-xs text-ink-secondary mt-1">
-            {games.toLocaleString("ru-RU")} {pluralRu(games, ["игра", "игры", "игр"])} ·{" "}
-            <span
-              className="font-semibold"
-              style={{
-                color:
-                  winRate >= 0.5
-                    ? "var(--color-status-good)"
-                    : "var(--color-status-critical)",
-              }}
-            >
-              винрейт {Math.round(winRate * 100)}%
+        <div className="absolute inset-0 bg-gradient-to-t from-page via-page/50 to-transparent" />
+        <div className="relative h-full flex flex-col justify-end p-5">
+          <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-accent mb-1">Сигнатурный герой</p>
+          <h3 className="font-display font-bold text-2xl text-ink drop-shadow">{heroName}</h3>
+          <div className="flex items-center gap-3 mt-2 text-sm">
+            <span className="font-mono tabular-nums text-ink-secondary">
+              {games.toLocaleString("ru-RU")} {pluralRu(games, ["игра", "игры", "игр"])}
             </span>
-          </p>
+            <span className="font-mono font-semibold tabular-nums" style={{ color }}>
+              {Math.round(winRate * 100)}% побед
+            </span>
+            <Link href={`/heroes/${heroId}`} className="ml-auto text-xs text-accent hover:underline underline-offset-4">
+              Гайд →
+            </Link>
+          </div>
         </div>
       </TiltCard>
       <AICoachPanel
         endpoint="/api/coach/hero"
         body={{ accountId, heroId }}
-        label={`Советы по игре на ${heroName}`}
+        label="Получить советы"
+        title={`Как играть на ${heroName} лучше`}
+        description={`Сильные и слабые стороны твоей игры на ${heroName} по твоим матчам на нём и конкретные советы.`}
       />
     </div>
   );

@@ -6,146 +6,213 @@ import { generateCandidates, evaluateChallenge } from "@/lib/challenges";
 import type { ChallengeCandidate, StoredChallenge } from "@/lib/challenges";
 import { loadChallenges, saveChallenges } from "@/lib/challengeStorage";
 import { ChallengeCandidateCard, StoredChallengeCard } from "./ChallengeCard";
+import { SteamIcon } from "./SteamIcon";
+import { SectionHeading } from "./PageHeader";
+import { inputField, primaryButton, secondaryButton } from "./buttonStyles";
 import type { TrendMatchSummary } from "@/lib/types";
 import { pluralRu } from "@/lib/format";
 
-interface Session {
-  accountId: number;
-  personaname: string | null;
-}
-
 const MATCH_LIMIT = 20;
 
-export function ChallengesBoard() {
-  const [session, setSession] = useState<Session | null | undefined>(undefined);
-  const [manualInput, setManualInput] = useState("");
-  const [manualAccountId, setManualAccountId] = useState<number | null>(null);
+// Kept outside the component: building a challenge stamps the current time,
+// which only ever happens from a click.
+function startNewChallenge(candidate: ChallengeCandidate): StoredChallenge {
+  const now = Date.now();
+  return { ...candidate, id: `${candidate.type}-${candidate.heroId ?? "x"}-${now}`, createdAt: now, status: "active" };
+}
 
+function ConnectCard({ onResolve }: { onResolve: (accountId: number) => void }) {
+  const [input, setInput] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const id = resolveAccountId(input);
+    if (id) {
+      setError(null);
+      onResolve(id);
+    } else {
+      setError("Не получилось распознать Steam ID или ссылку на профиль.");
+    }
+  }
+
+  return (
+    <div className="grid lg:grid-cols-2 gap-4">
+      <div
+        className="relative overflow-hidden bg-surface border border-accent/30 rounded-2xl p-6 flex flex-col gap-4"
+        style={{ background: "radial-gradient(500px 200px at 90% 0%, rgba(232,184,75,0.12), transparent), var(--color-surface)" }}
+      >
+        <div>
+          <h2 className="font-display font-bold text-xl text-ink">Войди через Steam</h2>
+          <p className="text-sm text-ink-secondary mt-2 leading-relaxed">
+            Испытания строятся по твоим последним играм и засчитываются только реальными матчами. После
+            входа вернись на эту страницу - цели уже будут ждать.
+          </p>
+        </div>
+        <a href="/api/auth/steam" className={`${primaryButton} self-start px-6 py-3`}>
+          <SteamIcon size={18} />
+          Войти через Steam
+        </a>
+      </div>
+      <form onSubmit={submit} className="bg-surface border border-border rounded-2xl p-6 flex flex-col gap-4">
+        <div>
+          <h2 className="font-display font-bold text-xl text-ink">Или укажи профиль</h2>
+          <p className="text-sm text-ink-secondary mt-2 leading-relaxed">
+            Steam64 ID, ID из Dota или ссылка на профиль Steam. Профиль должен быть открыт для OpenDota.
+          </p>
+        </div>
+        <div className="flex gap-2 mt-auto">
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="steamcommunity.com/profiles/…"
+            aria-label="Steam ID или ссылка на профиль"
+            className={inputField}
+          />
+          <button type="submit" className={secondaryButton}>
+            Найти
+          </button>
+        </div>
+        {error && (
+          <p role="alert" className="text-sm text-status-critical">
+            {error}
+          </p>
+        )}
+      </form>
+    </div>
+  );
+}
+
+function FormStrip({ matches }: { matches: TrendMatchSummary[] }) {
+  const n = matches.length;
+  const wins = matches.filter((m) => m.win).length;
+  const avgDeaths = matches.reduce((s, m) => s + m.deaths, 0) / n;
+  const avgKda = matches.reduce((s, m) => s + (m.kills + m.assists) / Math.max(1, m.deaths), 0) / n;
+  const tiles: [string, string][] = [
+    ["Игр в выборке", String(n)],
+    ["Винрейт", `${Math.round((wins / n) * 100)}%`],
+    ["Смертей за игру", avgDeaths.toLocaleString("ru-RU", { maximumFractionDigits: 1 })],
+    ["Средний KDA", avgKda.toLocaleString("ru-RU", { maximumFractionDigits: 1 })],
+  ];
+  return (
+    <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {tiles.map(([label, value]) => (
+        <div key={label} className="bg-surface border border-border rounded-2xl px-4 py-3">
+          <dt className="text-[11px] text-ink-muted uppercase tracking-wide">{label}</dt>
+          <dd className="font-mono text-xl text-ink tabular-nums mt-1">{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function AccountChallenges({ accountId, onChangeAccount }: { accountId: number; onChangeAccount?: () => void }) {
   const [matches, setMatches] = useState<TrendMatchSummary[] | null>(null);
   const [challenges, setChallenges] = useState<StoredChallenge[]>([]);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/auth/session")
-      .then((res) => res.json())
-      .then(setSession)
-      .catch(() => setSession(null));
-  }, []);
-
-  const accountId = session?.accountId ?? manualAccountId;
-
-  useEffect(() => {
-    if (!accountId) return;
-    setLoading(true);
-    setError(null);
+    let cancelled = false;
     fetch(`/api/player/${accountId}/matches?limit=${MATCH_LIMIT}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.error) throw new Error(data.error);
-        const fetchedMatches = data.matches as TrendMatchSummary[];
-        setMatches(fetchedMatches);
-
-        const stored = loadChallenges(accountId);
-        const reevaluated = stored.map((c) => {
+        if (cancelled) return;
+        const fetched = data.matches as TrendMatchSummary[];
+        // Re-check every active challenge against the games played since.
+        const reevaluated = loadChallenges(accountId).map((c) => {
           if (c.status === "completed") return c;
-          const result = evaluateChallenge(c, fetchedMatches);
+          const result = evaluateChallenge(c, fetched);
           return result.status === "completed"
-            ? {
-                ...c,
-                status: "completed" as const,
-                completedMatchId: result.completedMatchId,
-                completedAt: result.completedAt,
-              }
+            ? { ...c, status: "completed" as const, completedMatchId: result.completedMatchId, completedAt: result.completedAt }
             : c;
         });
-        setChallenges(reevaluated);
         saveChallenges(accountId, reevaluated);
+        setMatches(fetched);
+        setChallenges(reevaluated);
       })
-      .catch((err) =>
-        setError(err instanceof Error ? err.message : "Не удалось загрузить твои матчи")
-      )
-      .finally(() => setLoading(false));
+      .catch(() => {
+        if (!cancelled) setError("Не удалось загрузить твои матчи из OpenDota. Попробуй обновить страницу через минуту.");
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [accountId]);
 
-  function startChallenge(candidate: ChallengeCandidate) {
-    if (!accountId) return;
-    const newChallenge: StoredChallenge = {
-      ...candidate,
-      id: `${candidate.type}-${candidate.heroId ?? "x"}-${Date.now()}`,
-      createdAt: Date.now(),
-      status: "active",
-    };
-    const updated = [...challenges, newChallenge];
-    setChallenges(updated);
-    saveChallenges(accountId, updated);
+  function update(next: StoredChallenge[]) {
+    setChallenges(next);
+    saveChallenges(accountId, next);
   }
 
-  function dismissChallenge(id: string) {
-    if (!accountId) return;
-    const updated = challenges.filter((c) => c.id !== id);
-    setChallenges(updated);
-    saveChallenges(accountId, updated);
-  }
-
-  if (session === undefined) {
-    return <p className="text-sm text-ink-muted">Загрузка...</p>;
-  }
-
-  if (!accountId) {
+  if (error) {
     return (
-      <div className="bg-surface border border-border rounded-lg p-5 max-w-md space-y-3">
-        <p className="text-sm text-ink-secondary">
-          Войди через Steam или укажи свой профиль, чтобы получить
-          тренировочные испытания по твоим последним играм.
-        </p>
-        <div className="flex gap-2">
-          <input
-            value={manualInput}
-            onChange={(e) => setManualInput(e.target.value)}
-            placeholder="Steam64 ID или ссылка на профиль"
-            className="flex-1 bg-page border border-border rounded-md px-3 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-accent"
-          />
-          <button
-            onClick={() => {
-              const id = resolveAccountId(manualInput);
-              if (id) {
-                setError(null);
-                setManualAccountId(id);
-              } else {
-                setError("Не получилось распознать Steam ID или ссылку.");
-              }
-            }}
-            className="bg-accent hover:brightness-110 text-page text-sm font-medium px-4 py-2 rounded-md transition"
-          >
-            Найти
+      <div className="bg-surface border border-border rounded-2xl p-6 space-y-3" role="alert">
+        <p className="text-sm text-status-critical">{error}</p>
+        {onChangeAccount && (
+          <button type="button" onClick={onChangeAccount} className={secondaryButton}>
+            Указать другой профиль
           </button>
-        </div>
-        {error && <p className="text-sm text-status-critical">{error}</p>}
+        )}
       </div>
     );
   }
 
-  if (loading && !matches) {
-    return <p className="text-sm text-ink-muted">Загружаю твои последние игры...</p>;
+  if (!matches) {
+    return (
+      <div className="space-y-6" aria-busy="true" aria-label="Загружаю твои последние игры">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-[74px] rounded-2xl bg-surface border border-border animate-pulse" />
+          ))}
+        </div>
+        <div className="grid md:grid-cols-3 gap-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="h-[190px] rounded-2xl bg-surface border border-border animate-pulse" />
+          ))}
+        </div>
+      </div>
+    );
   }
-  if (error) {
-    return <p className="text-sm text-status-critical">{error}</p>;
-  }
-  if (!matches) return null;
 
-  const activeTypes = new Set(
-    challenges.filter((c) => c.status === "active").map((c) => c.type)
-  );
+  if (matches.length === 0) {
+    return (
+      <div className="bg-surface border border-border rounded-2xl p-6 text-sm text-ink-secondary leading-relaxed">
+        Не видно ни одной недавней игры. Включи в Dota 2 опцию «Expose Public Match Data» и сыграй матч - после
+        этого здесь появятся испытания.
+      </div>
+    );
+  }
+
+  const active = challenges.filter((c) => c.status === "active");
+  const completed = challenges.filter((c) => c.status === "completed");
+  const activeTypes = new Set(active.map((c) => c.type));
   const candidates = generateCandidates(matches).filter((c) => !activeTypes.has(c.type));
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-10">
+      <section>
+        <SectionHeading
+          title="Твоя форма"
+          note={`По ${matches.length} ${pluralRu(matches.length, ["последней игре", "последним играм", "последним играм"])} - от этих цифр считаются цели.`}
+          right={
+            onChangeAccount && (
+              <button type="button" onClick={onChangeAccount} className="text-sm text-ink-muted hover:text-accent transition">
+                Сменить профиль
+              </button>
+            )
+          }
+        />
+        <FormStrip matches={matches} />
+      </section>
+
       {challenges.length > 0 && (
-        <div>
-          <h2 className="text-sm font-semibold text-ink mb-3">Твои испытания</h2>
-          <div className="space-y-3">
-            {challenges.map((c) => {
+        <section>
+          <SectionHeading
+            title="Твои испытания"
+            note={`В процессе: ${active.length} · выполнено: ${completed.length}. Проверяются по каждой новой игре.`}
+          />
+          <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {[...active, ...completed].map((c) => {
               const result = c.status === "active" ? evaluateChallenge(c, matches) : null;
               return (
                 <StoredChallengeCard
@@ -153,41 +220,48 @@ export function ChallengesBoard() {
                   challenge={c}
                   accountId={accountId}
                   qualifyingGamesSoFar={result?.qualifyingGamesSoFar ?? 0}
-                  onDismiss={() => dismissChallenge(c.id)}
+                  onDismiss={() => update(challenges.filter((x) => x.id !== c.id))}
                 />
               );
             })}
           </div>
-        </div>
+        </section>
       )}
 
-      <div>
-        <h2 className="text-sm font-semibold text-ink mb-3">
-          Предложено для тебя на основе {matches.length}{" "}
-          {pluralRu(matches.length, ["последней игры", "последних игр", "последних игр"])}
-        </h2>
+      <section>
+        <SectionHeading
+          title="Новые вызовы"
+          note="Цели чуть выше твоего текущего уровня. Прими вызов - и он засчитается первой же игрой, где ты его выполнишь."
+        />
         {candidates.length === 0 ? (
-          <p className="text-sm text-ink-muted">
-            Новых предложений пока нет - в свежей статистике не видно явных
-            слабых мест, или ты уже начал все предложенные испытания.
-          </p>
+          <div className="bg-surface border border-border rounded-2xl p-6 text-sm text-ink-secondary leading-relaxed">
+            Новых предложений пока нет: в свежей статистике не видно явных слабых мест, или ты уже принял все
+            предложенные испытания.
+          </div>
         ) : (
-          <div className="space-y-3">
+          <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
             {candidates.map((c) => (
-              <ChallengeCandidateCard
-                key={c.type}
-                candidate={c}
-                onStart={() => startChallenge(c)}
-              />
+              <ChallengeCandidateCard key={c.type} candidate={c} onStart={() => update([...challenges, startNewChallenge(c)])} />
             ))}
           </div>
         )}
-      </div>
+      </section>
 
-      <p className="text-xs text-ink-muted">
-        Прогресс хранится только в этом браузере - на другом устройстве его
-        не будет.
-      </p>
+      <p className="text-xs text-ink-muted">Прогресс хранится только в этом браузере - на другом устройстве его не будет.</p>
     </div>
+  );
+}
+
+export function ChallengesBoard({ sessionAccountId }: { sessionAccountId: number | null }) {
+  const [manualAccountId, setManualAccountId] = useState<number | null>(null);
+  const accountId = sessionAccountId ?? manualAccountId;
+
+  if (!accountId) return <ConnectCard onResolve={setManualAccountId} />;
+  return (
+    <AccountChallenges
+      key={accountId}
+      accountId={accountId}
+      onChangeAccount={sessionAccountId === null ? () => setManualAccountId(null) : undefined}
+    />
   );
 }

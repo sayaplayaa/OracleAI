@@ -16,17 +16,21 @@ export interface PlayerDetail {
 export function MatchOverviewInteractive({
   radiantPlayers,
   direPlayers,
+  radiantWin,
   playerDetails,
   matchId,
   focusedAccountId,
+  focusLabel,
   goldAdvantage,
   xpAdvantage,
 }: {
   radiantPlayers: FullMatchPlayer[];
   direPlayers: FullMatchPlayer[];
+  radiantWin: boolean;
   playerDetails: Record<number, PlayerDetail>;
   matchId: number;
   focusedAccountId: number | null;
+  focusLabel?: string;
   // Per-minute Radiant lead; empty when the replay isn't parsed.
   goldAdvantage: number[];
   xpAdvantage: number[];
@@ -37,14 +41,13 @@ export function MatchOverviewInteractive({
     selectedAccountId !== null
       ? [...radiantPlayers, ...direPlayers].find((p) => p.accountId === selectedAccountId)
       : undefined;
-  const selectedDetail =
-    selectedAccountId !== null ? playerDetails[selectedAccountId] : undefined;
+  const selectedDetail = selectedAccountId !== null ? playerDetails[selectedAccountId] : undefined;
 
   const hasTimeline =
     goldAdvantage.length > 1 || [...radiantPlayers, ...direPlayers].some((p) => p.series.netWorth.length > 1);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {hasTimeline ? (
         <MatchGraphs
           goldAdvantage={goldAdvantage}
@@ -66,12 +69,15 @@ export function MatchOverviewInteractive({
       <FullMatchScoreboard
         radiantPlayers={radiantPlayers}
         direPlayers={direPlayers}
+        radiantWin={radiantWin}
         focusedAccountId={focusedAccountId}
+        focusLabel={focusLabel}
         selectedAccountId={selectedAccountId}
         onSelectPlayer={setSelectedAccountId}
       />
       {selectedPlayer && selectedDetail && (
         <PlayerDetailPanel
+          key={selectedPlayer.accountId}
           player={selectedPlayer}
           matchId={matchId}
           metrics={selectedDetail.metrics}

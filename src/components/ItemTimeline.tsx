@@ -2,7 +2,7 @@ import { ItemIcon } from "./ItemIcon";
 import type { ItemProgressionPoint } from "@/lib/types";
 
 function formatTime(seconds: number): string {
-  return `${Math.round(seconds / 60)} мин`;
+  return `${Math.round(seconds / 60)}′`;
 }
 
 export function ItemTimeline({ items }: { items: ItemProgressionPoint[] }) {
@@ -11,22 +11,24 @@ export function ItemTimeline({ items }: { items: ItemProgressionPoint[] }) {
   }
 
   return (
-    <div className="overflow-x-auto pb-1">
-      <div className="flex items-start gap-2 min-w-max relative pt-3">
-        <div className="absolute top-[15px] left-2 right-2 h-px bg-border" />
-        {items.map((item) => (
-          <div key={item.itemKey} className="flex flex-col items-center w-16 shrink-0">
-            <span className="w-1.5 h-1.5 rounded-full bg-accent mb-2 z-10" />
-            <ItemIcon itemKey={item.itemKey} size={32} />
-            <span className="text-[10px] text-ink-muted font-mono mt-1">
-              {formatTime(item.avgTimeSeconds)}
+    <div className="overflow-x-auto scrollbar-none pb-1">
+      <ol className="flex items-start gap-1 min-w-max relative pt-1">
+        <span className="absolute top-[21px] left-6 right-6 h-px bg-gradient-to-r from-accent/60 via-accent/30 to-transparent" aria-hidden />
+        {items.map((item, i) => (
+          <li key={item.itemKey} className="relative flex flex-col items-center w-[72px] shrink-0">
+            <span className="relative rounded-md ring-2 ring-page">
+              <ItemIcon itemKey={item.itemKey} size={40} />
+              <span className="absolute -top-1.5 -left-1.5 w-4 h-4 rounded-full bg-accent text-page text-[9px] font-bold font-mono flex items-center justify-center">
+                {i + 1}
+              </span>
             </span>
-            <span className="text-[10px] text-ink-secondary text-center leading-tight mt-0.5 line-clamp-2">
+            <span className="text-[11px] text-accent font-mono mt-1.5 tabular-nums">~{formatTime(item.avgTimeSeconds)}</span>
+            <span className="text-[10px] text-ink-secondary text-center leading-tight mt-0.5 line-clamp-2 px-0.5">
               {item.itemName}
             </span>
-          </div>
+          </li>
         ))}
-      </div>
+      </ol>
     </div>
   );
 }

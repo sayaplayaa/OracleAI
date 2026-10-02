@@ -87,11 +87,31 @@ function writeCachedReport(accountId: number, matchId: number, report: CoachRepo
   }
 }
 
+// The server already words Ollama failures in Russian (see coach/client.ts);
+// these only pick the headline and the one action that fixes each case.
 function friendlyError(message: string): { title: string; hint: string } {
-  if (/ollama/i.test(message)) {
+  if (/не удалось подключиться к ollama/i.test(message)) {
     return {
       title: "ИИ-тренер сейчас недоступен",
-      hint: "Запусти Ollama (команда ollama serve) и убедись, что модель qwen3:8b скачана, затем нажми «Повторить».",
+      hint: "Запусти Ollama (приложение или команда ollama serve) и нажми «Повторить».",
+    };
+  }
+  if (/нет модели/i.test(message)) {
+    return {
+      title: "Модель ИИ-тренера не скачана",
+      hint: "Выполни в терминале ollama pull qwen3:8b, дождись загрузки и нажми «Повторить».",
+    };
+  }
+  if (/не хватило памяти/i.test(message)) {
+    return {
+      title: "ИИ-тренеру не хватило памяти",
+      hint: "Закрой игры и программы, которые нагружают видеокарту, и нажми «Повторить». Подробности - ниже.",
+    };
+  }
+  if (/ollama|ИИ-тренер/i.test(message)) {
+    return {
+      title: "ИИ-тренер не смог составить разбор",
+      hint: "Обычно помогает повторить попытку. Если ошибка повторяется - подробности ниже.",
     };
   }
   if (/timed out|stalled|OpenDota request failed|OpenDota не отвечает|запрос к OpenDota/i.test(message)) {

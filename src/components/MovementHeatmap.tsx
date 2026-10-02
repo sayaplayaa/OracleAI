@@ -2,8 +2,8 @@ import { HeroIcon } from "./HeroIcon";
 import type { FullMatchPlayer } from "@/lib/types";
 
 const GRID_SIZE = 14;
-// Sequential blue ramp, light -> dark (palette.md steps 100..700).
-const BLUE_RAMP = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#1c5cab", "#0d366b"];
+// On the dark page more time reads as brighter: one accent hue, stepped opacity.
+const HEAT_STEPS = [0.18, 0.32, 0.48, 0.64, 0.8, 1];
 
 function bucketIndex(value: number, min: number, span: number): number {
   const t = span === 0 ? 0 : (value - min) / span;
@@ -32,15 +32,12 @@ function MiniHeatmap({
 }) {
   const cellSize = 100 / GRID_SIZE;
   return (
-    <svg viewBox="0 0 100 100" className="w-full aspect-square rounded bg-page">
+    <svg viewBox="0 0 100 100" className="w-full aspect-square rounded-lg bg-page border border-border">
       {grid.map((row, y) =>
         row.map((count, x) => {
           if (count === 0) return null;
           const intensity = Math.min(1, count / maxCount);
-          const stepIndex = Math.min(
-            BLUE_RAMP.length - 1,
-            Math.floor(intensity * BLUE_RAMP.length)
-          );
+          const stepIndex = Math.min(HEAT_STEPS.length - 1, Math.floor(intensity * HEAT_STEPS.length));
           return (
             <rect
               key={`${x}-${y}`}
@@ -48,7 +45,8 @@ function MiniHeatmap({
               y={100 - (y + 1) * cellSize}
               width={cellSize}
               height={cellSize}
-              fill={BLUE_RAMP[stepIndex]}
+              fill="var(--color-accent)"
+              fillOpacity={HEAT_STEPS[stepIndex]}
             />
           );
         })
@@ -85,19 +83,21 @@ export function MovementHeatmap({
   const maxCount = Math.max(...grids.flatMap((g) => g.flat()), 1);
 
   return (
-    <div className="bg-surface border border-border rounded-lg p-5">
-      <h3 className="text-sm font-semibold text-ink-secondary mb-1">
-        Где каждый игрок проводил время
-      </h3>
-      <p className="text-xs text-ink-muted mb-3">
-        Плотность позиций из разобранного реплея OpenDota: чем темнее, тем
-        больше времени игрок провёл в этой точке. Шкала общая для всех 10
-        игроков.
+    <section className="bg-surface border border-border rounded-2xl p-5">
+      <h3 className="font-display font-bold text-base text-ink">Где каждый игрок проводил время</h3>
+      <p className="text-xs text-ink-muted mt-1 mb-4">
+        Плотность позиций из разобранного реплея: чем ярче клетка, тем больше времени игрок провёл в этой
+        точке. Шкала общая для всех 10 игроков.
       </p>
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         {withHeatmap.map((p, i) => (
           <div key={`${p.heroId}-${p.accountId ?? "anon"}`}>
-            <div className="flex items-center gap-1.5 mb-1">
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <span
+                className="w-1 h-4 rounded-full shrink-0"
+                style={{ background: p.isRadiant ? "#3fa34d" : "#e34948" }}
+                aria-label={p.isRadiant ? "Radiant" : "Dire"}
+              />
               <HeroIcon heroId={p.heroId} size={20} />
               <span className="text-xs text-ink truncate">{p.heroName}</span>
             </div>
@@ -105,6 +105,6 @@ export function MovementHeatmap({
           </div>
         ))}
       </div>
-    </div>
+    </section>
   );
 }
