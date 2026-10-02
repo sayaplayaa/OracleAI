@@ -1,64 +1,117 @@
 import type {
+  CrossMatchPatterns,
   DraftInsights,
   HeroAbility,
   HeroRoleOverview,
-  MatchMetrics,
   MatchStory,
   ProHeroSpotlight,
   RoleComparisonEntry,
-  SkillBuildEntry,
   TrendMetrics,
 } from "../types";
 import type { HeroPerformanceSummary } from "../metrics/signatureHero";
-import { getItemDescription } from "../constants";
 
-function formatMatchTime(seconds: number): string {
-  if (seconds < 0) return "pre-game";
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
+// Established Dota 2 coaching/analyst vocabulary - the kind of terminology a
+// real coach, a pro caster, or a serious strategy writeup actually uses, not
+// invented for this app. The model is told to use a term only when the real
+// data below actually supports it. Written in Russian (with the jargon Russian
+// players really use), since the model writes its reports in Russian.
+const COACHING_VOCABULARY = `Словарь тренера по Dota 2 - используй точные термины, когда данные действительно их подтверждают (никогда не притягивай термин, который не подходит):
+- Эквилибриум линии: где волна крипов естественно встаёт в зависимости от того, кто больше добил и заденаил, - от этого зависит, насколько безопасно там фармить.
+- Пулл / стак: пулл - увести агр лайновых крипов в лагерь в джангле, чтобы сбросить эквилибриум или лишить врага опыта; стак - сагрить нейтральный лагерь на :53, чтобы поверх него появился новый.
+- Мисс / ротация: герой (особенно мид) уходит со своей линии ганкать - невидимый на карте вражеский герой - главный признак скорого ганка.
+- Smoke-ганк: движение группой под Smoke of Deceit (не видно на миникарте) для засады.
+- Фейсчек: заход в деревья/за скалу/в реку без обзора и информации - частая и избегаемая причина смерти.
+- Девард / контроль обзора: уничтожение вражеских Observer Ward/Sentry Ward перед спорным розыгрышем (Roshan, ганк, пуш), чтобы лишить врага информации.
+- Темп: скорость, с которой преимущество (фарм, килл) превращается в цели на карте, пока враг не стабилизировался, - слишком долгий фарм после килла «теряет темп».
+- Пик силы: конкретный уровень или предмет, дающий герою резкое, реальное, ограниченное по времени преимущество (открытие ультимейта, готовый ключевой предмет).
+- Тайминг BKB: Black King Bar даёт неуязвимость к заклинаниям на время - нажать слишком рано значит потратить впустую, слишком поздно - ты уже под контролем.
+- Защита хайграунда: возвышенность даёт защитникам шанс промаха и преимущество в обзоре - проиграть преимущество, форсируя драки на хайграунде, - один из самых частых способов, которыми выигрывающая команда проигрывает.
+- Тайминг бай-бека: держать золото на мгновенное возрождение перед важной дракой (Roshan, защита хайграунда) - стандартная привычка управления риском, а не только аварийная кнопка.
+- Сплит-пуш: герой пушит/фармит один на боковой линии, пока команда стоит в другом месте, - давление на карту в обмен на временное 5 на 4 в любой другой драке.
+- Блок / агр крипов: управление путём или агром волны, чтобы контролировать эквилибриум или лишать врага фарма.
+- Окно Roshan: период, когда команда реально может забрать Roshan (по уровням/предметам или после таймера предыдущего Aegis) - и слишком ранняя попытка, и слишком долгое игнорирование - реальные ошибки.`;
+
+export const SYSTEM_PROMPT = `Ты - опытный тренер по Dota 2, который разбирает данные игры ученика. Пиши так, будто ты действительно смотрел игру, как настоящий тренер или аналитик, разбирающий запись, а не как осторожный статистик, который сомневается в каждом предложении.
+
+ЯЗЫК: пиши весь ответ только на русском языке. Названия НЕ переводи и не транслитерируй: имена героев, способностей, предметов и юнитов пиши латиницей ровно так, как они даны в данных (Anti-Mage, Black King Bar, Roshan, Observer Ward, Smoke of Deceit), а не «Антимаг», «БКБ», «Рошан», «обсервер». Не придумывай названий, которых нет в данных.
+
+Правила:
+- Рассуждай только на основе данных JSON, которые тебе даны. Никогда не придумывай способности героев, матчапы или события, которых нет в цифрах.
+- Каждая сильная сторона, слабость и совет должны в поле "metric" ссылаться на конкретное поле/значение из данных (например: «Золото в минуту 412, 35-й перцентиль» или «Нетворс на 10-й минуте 2100»).
+- Если есть перцентиль, используй его, чтобы понять, хороший это показатель для героя или плохой, а не гадай по сырому числу.
+- Никогда не повторяй игроку просто число - он и так видит статистику на экране. Твоя задача - связать причину и следствие (почему показатель такой) и превратить это в конкретную инструкцию, что делать иначе. Пункт «Золото в минуту было 412» бесполезен; «Фарм застрял на 412 золота в минуту (35-й перцентиль), потому что смерти на 6:40 и 14:10 стоили двух волн - ставь вард на лагерь для пулла, прежде чем идти туда» - вот уровень.
+- Ставь диагноз уверенно. Не пиши «возможно», «вероятно», «это может указывать», когда данные позволяют сказать прямо: «ты умер, потому что X», «в следующий раз делай Y».
+- Советы должны быть конкретными и выполнимыми (что изменить, а не только что пошло не так).
+- Тон - прямой, подбадривающий и привязанный к этим данным, а не общие советы по Dota.
+- Никогда не называй конкретный предмет, который нужно купить или собрать в первую очередь, если именно этого предмета нет в реальных данных о покупках. Не рассуждай о таймингах предметов на общих знаниях - ты не знаешь реальную кривую золота этого игрока и что он мог себе позволить в конкретный момент, а реальная цена предмета может сделать совет невыполнимым (Manta Style стоит 4 700 золота, стартовое золото - около 600). Если хочешь дать совет по предметам без реальной покупки, опиши тип предмета (предмет на мобильность, на обзор, на выживаемость), а не называй его.
+- Обзор (варды, деварды, стаки, пуллы) - работа саппортов (позиции 4/5), а не кор-героев (позиции 1/2/3). Мало вардов у героя с сильным фармом для своей роли - это нормально, а не слабость. Никогда не говори кор-герою «покупай больше вардов» и не считай 0 вардов его ошибкой. Поднимай тему обзора как реальную слабость только если данные показывают, что игрок был в роли саппорта.
+- Прежде чем критиковать боевой показатель (станы, лечение и т.п.), проверь, есть ли у героя вообще способность для него. Ноль по показателю, для которого у героя нет инструмента, - не ошибка, а особенность героя; называй это слабостью только если у героя есть подходящая способность, которую игрок недоиспользовал.
+
+${COACHING_VOCABULARY}`;
+
+function formatLaneTally(tally: { ahead: number; behind: number; tied: number; sampledGames: number }): string {
+  if (tally.sampledGames === 0) return "в выбранных играх нет реальных данных о сопернике по линии";
+  return `впереди в ${tally.ahead}, позади в ${tally.behind}, наравне в ${tally.tied} из ${tally.sampledGames} игр с реальными данными о сопернике по линии`;
 }
 
-export const SYSTEM_PROMPT = `You are an expert Dota 2 coach reviewing a student's performance data.
+export function buildTrendCoachPrompt(
+  metrics: TrendMetrics,
+  patterns: CrossMatchPatterns
+): string {
+  const hasPatternData = patterns.parsedGamesSampled > 0;
 
-Rules:
-- Only reason from the JSON data you are given. Never invent hero abilities, matchups, or events that are not represented in the numbers.
-- Every strength, weakness, and tip must cite a specific field/value from the data in its "metric" field (e.g. "GPM 412, 35th percentile" or "3 deaths before 10 minutes were not observed in this data, but net worth at 10 min was 2100").
-- If a percentile is present, use it to judge whether a stat is actually good or bad for that hero, rather than guessing from the raw number alone.
-- Be concrete and actionable in tips (what to change, not just what went wrong).
-- Keep tone direct, encouraging, and specific to this data - not generic Dota advice.`;
+  return `Вот обобщённые данные по последним ${metrics.sampleSize} матчам этого игрока. Составь отчёт тренера на русском языке через инструмент submit_coaching_report, сосредоточившись на повторяющихся закономерностях, а не на одной игре - на том, что раз за разом происходит в его реальных матчах.
 
-export function buildMatchCoachPrompt(metrics: MatchMetrics): string {
-  return `Here is the data for one Dota 2 match. Produce a coaching report via the submit_coaching_report tool.
+${
+  hasPatternData
+    ? `Реальные закономерности, найденные в последних ${patterns.parsedGamesSampled} полностью разобранных матчах этого игрока (ничего не угадано - неразобранные OpenDota матчи сюда просто не попадают):
+- Повторяющиеся убийцы: герои, которые убивали этого игрока больше одного раза, начиная с самого частого: ${patterns.recurringKillers.length > 0 ? JSON.stringify(patterns.recurringKillers) : "повторов нет"}. Герой, встречающийся 3+ раза, - реальная закономерность, которую стоит назвать, а не совпадение.
+- Добивания на 10-й минуте против реального соперника по линии: ${formatLaneTally(patterns.laneLastHits)}.
+- Золото на 10-й минуте против реального соперника по линии: ${formatLaneTally(patterns.laneGold)}.
 
-${JSON.stringify(metrics, null, 2)}`;
-}
+ОБЯЗАТЕЛЬНО: хотя бы одна сильная сторона или слабость и хотя бы один совет ДОЛЖНЫ быть построены на этих данных, с точными числами (например: «тебя 7 раз убил Snapfire в последних 3 разобранных матчах» или «ты был впереди по золоту на линии во всех 3 играх»). Пиши это в поле "metric" коротко и по-русски (например: «Snapfire 7 раз, Legion Commander 6 раз, Juggernaut 5 раз») - никогда не вставляй сырой JSON-массив. Это реальная личная повторяющаяся закономерность, и она важнее общей статистики ниже, которую можно использовать для остального отчёта, но она не должна вытеснять эти находки.
 
-export function buildTrendCoachPrompt(metrics: TrendMetrics): string {
-  return `Here is aggregated performance data across this player's last ${metrics.sampleSize} matches. Produce a coaching report via the submit_coaching_report tool, focused on recurring patterns rather than any single game.
+`
+    : `Данных о закономерностях нет (ни один из последних матчей ещё не разобран OpenDota полностью) - строй отчёт только на общей статистике ниже и не придумывай повторяющихся закономерностей, которых нет в данных.
 
-${JSON.stringify(metrics, null, 2)}`;
+`
+}Общая статистика по выборке (без списка отдельных матчей - этот отчёт о том, что повторяется, поэтому не выдавай киллы/смерти одной игры за закономерность, если это не подтверждено данными выше):
+${JSON.stringify(
+  {
+    sampleSize: metrics.sampleSize,
+    winRate: metrics.winRate,
+    avgKda: metrics.avgKda,
+    avgGpm: metrics.avgGpm,
+    avgXpm: metrics.avgXpm,
+    avgDeaths: metrics.avgDeaths,
+    roleDistribution: metrics.roleDistribution,
+    topHeroes: metrics.topHeroes,
+    worstHeroes: metrics.worstHeroes,
+  },
+  null,
+  2
+)}`;
 }
 
 export function buildMatchStoryCoachPrompt(
   roleComparisons: RoleComparisonEntry[],
   matchStory: MatchStory
 ): string {
-  return `You are analyzing a full 10-player Dota 2 match, not a single player. Explain what actually decided the outcome, using the submit_coaching_report tool with this framing:
-- "strengths" = which side/players had the advantage in each position matchup and why (cite the specific stat).
-- "weaknesses" = where the losing side (or an underperforming position) fell behind, cited from the position comparisons or match events.
-- "tips" = what the losing side's players could have done differently, grounded in the specific gap shown (e.g. a specific position lost net worth by a specific amount, or a specific objective/teamfight swung the game).
-- "summary" = 2-3 sentences on what decided this game overall.
+  return `Ты разбираешь целый матч Dota 2 из 10 игроков, а не одного игрока. Объясни на русском языке, что на самом деле решило исход, через инструмент submit_coaching_report вот так:
+- "strengths" = какая сторона/игроки имели преимущество в каждом противостоянии позиций и почему (со ссылкой на конкретный показатель).
+- "weaknesses" = где проигравшая сторона (или отстающая позиция) отстала - по сравнению позиций или событиям матча.
+- "tips" = что игроки проигравшей стороны могли сделать иначе, исходя из конкретного разрыва (например, конкретная позиция отстала по нетворсу на конкретную сумму, или конкретная цель/драка переломила игру).
+- "summary" = 2-3 предложения о том, что в целом решило эту игру.
 
-Position-by-position comparisons (radiant vs dire, same role):
+Сравнение по позициям (Силы Света против Сил Тьмы, одна и та же роль; radiant = Силы Света, dire = Силы Тьмы):
 ${JSON.stringify(roleComparisons, null, 2)}
 
-Match story - objective/teamfight timeline and momentum swings:
+История матча - хронология целей и драк, переломные моменты:
 ${JSON.stringify(matchStory, null, 2)}`;
 }
 
 export function buildHeroCoachPrompt(performance: HeroPerformanceSummary): string {
-  return `Here is this player's performance data on their most-played hero, ${performance.heroName}: lifetime stats plus their most recent games on this specific hero. Produce a coaching report via the submit_coaching_report tool focused entirely on how to play this hero better - not general Dota advice.
+  return `Вот данные этого игрока на его самом частом герое, ${performance.heroName}: статистика за всё время плюс последние игры на этом герое. Составь отчёт тренера на русском языке через инструмент submit_coaching_report, полностью посвящённый тому, как лучше играть на этом герое, - а не общие советы по Dota.
 
 ${JSON.stringify(performance, null, 2)}`;
 }
@@ -67,16 +120,16 @@ export function buildProComparisonPrompt(
   userPerformance: HeroPerformanceSummary,
   proSpotlight: ProHeroSpotlight
 ): string {
-  return `Compare this player's performance on ${userPerformance.heroName} against a real professional/competitive player (${proSpotlight.pro.name}${proSpotlight.pro.teamName ? `, ${proSpotlight.pro.teamName}` : ""}) on the same hero, using the submit_coaching_report tool with this framing:
-- "strengths" = stats where this player already matches or beats the pro's numbers, each citing both numbers.
-- "weaknesses" = the biggest real gaps between this player's numbers and the pro's, each citing both numbers.
-- "tips" = concrete adjustments this player should make to close those gaps, grounded in the specific stat gap (not generic hero advice).
-- "summary" = 2-3 sentences on the single biggest thing to take from the pro's games on this hero.
+  return `Сравни игру этого игрока на ${userPerformance.heroName} с реальным профессиональным игроком (${proSpotlight.pro.name}${proSpotlight.pro.teamName ? `, ${proSpotlight.pro.teamName}` : ""}) на том же герое. Пиши на русском языке, через инструмент submit_coaching_report вот так:
+- "strengths" = показатели, где игрок уже на уровне про или лучше, с обоими числами.
+- "weaknesses" = самые большие реальные разрывы между показателями игрока и про, с обоими числами.
+- "tips" = конкретные изменения, которые помогут сократить эти разрывы, исходя из конкретного разрыва (а не общие советы по герою).
+- "summary" = 2-3 предложения о самом главном, что стоит взять из игр про на этом герое.
 
-This player's data on ${userPerformance.heroName}:
+Данные игрока на ${userPerformance.heroName}:
 ${JSON.stringify(userPerformance, null, 2)}
 
-${proSpotlight.pro.name}'s data on ${proSpotlight.heroName} (their own recent games on this hero):
+Данные ${proSpotlight.pro.name} на ${proSpotlight.heroName} (его последние игры на этом герое):
 ${JSON.stringify(proSpotlight, null, 2)}`;
 }
 
@@ -86,58 +139,22 @@ export function buildHeroGuidePrompt(
   roleOverview: HeroRoleOverview,
   matchups: DraftInsights
 ): string {
-  return `Write a Dota 2 hero guide for ${heroName} using the submit_hero_guide tool. This is general hero knowledge for any player learning the hero, not personal coaching for one player's performance.
+  return `Напиши на русском языке гайд по герою Dota 2 ${heroName} через инструмент submit_hero_guide. Это общие знания о герое для любого игрока, который его осваивает, а не личный разбор игры одного игрока.
 
-Rules:
-- Every tip must cite either a real ability name/effect from the kit below, or a real number from the role/matchup data below (e.g. "Mana Void deals damage per point of missing mana" or "62% win rate as Position 1, 340 games" or "38% win rate vs Axe, 25 games").
-- Never invent an ability effect, cooldown, or matchup that isn't represented in this data.
-- "laningTips" and "powerSpikeTips" should be grounded in the ability kit (what each ability does early, when it comes online).
-- "teamfightTips" should be grounded in the ability kit's teamfight-relevant effects.
-- "matchupTips" should be grounded in the real toughest/best matchups listed below - what to do differently against/with those specific heroes.
+Правила:
+- Каждый совет должен ссылаться либо на реальную способность/эффект из набора ниже, либо на реальное число из данных по ролям/матчапам (например: «Mana Void наносит урон за каждую единицу недостающей маны», «62% побед на позиции 1, 340 игр», «38% побед против Axe, 25 игр»).
+- Никогда не придумывай эффект способности, перезарядку или матчап, которых нет в этих данных.
+- "laningTips" и "powerSpikeTips" должны основываться на наборе способностей (что каждая способность даёт рано, когда она раскрывается).
+- "teamfightTips" должны основываться на эффектах способностей, важных в тимфайтах.
+- "matchupTips" должны основываться на реальных самых сложных/удобных матчапах ниже - что делать иначе против этих конкретных героев или вместе с ними.
+- Названия героев, способностей и предметов оставляй как в данных (по-английски).
 
-Real ability kit (official game data):
+Реальный набор способностей (официальные данные игры):
 ${JSON.stringify(abilities, null, 2)}
 
-Real role win rates (current week, STRATZ):
+Реальные винрейты по ролям (текущая неделя, STRATZ):
 ${JSON.stringify(roleOverview, null, 2)}
 
-Real matchup data (OpenDota, all-time):
+Реальные данные по матчапам (OpenDota, за всё время):
 ${JSON.stringify({ toughestMatchups: matchups.toughestMatchups, bestMatchups: matchups.bestMatchups }, null, 2)}`;
-}
-
-export function buildPowerSpikePrompt(
-  heroName: string,
-  abilities: HeroAbility[],
-  itemTimeline: { time: number; itemName: string; itemKey: string }[],
-  skillBuild: SkillBuildEntry[]
-): string {
-  const itemsWithTiming = itemTimeline.map((item) => ({
-    item: item.itemName,
-    time: formatMatchTime(item.time),
-    effect: getItemDescription(item.itemKey),
-  }));
-  const levelsWithTiming = skillBuild.map((entry) => ({
-    level: entry.level,
-    ability: entry.abilityName,
-    time: entry.approxTimeSeconds !== null ? `~${formatMatchTime(entry.approxTimeSeconds)}` : "unknown",
-  }));
-
-  return `Identify 3-5 real power-spike moments for ${heroName} in this exact match, using the submit_power_spike_report tool.
-
-A power spike is any real, specific moment from the data below - an item completing, a level reached, an ability coming online - that gives this hero a tangible, time-limited advantage over the opponent.
-
-Rules:
-- Only use triggers ("trigger"/"timing") that are literally present in the data below - never invent an item, level, or a timing not given here.
-- "why" must cite the specific item's or ability's real effect (from "effect" below, or the ability kit) - not generic hero knowledge.
-- "whatToDo" is concrete tactical advice for that exact window (a map objective, a camp/rune to take, a rotation, a fight to look for) - general Dota tactical knowledge is fine here, but it must be clearly tied to the specific trigger (e.g. "you just got X, which does Y, so go do Z now while it's live").
-- Order moments chronologically.
-
-This hero's real ability kit:
-${JSON.stringify(abilities, null, 2)}
-
-Real items purchased in this match, in order (with real timing and the item's official effect):
-${JSON.stringify(itemsWithTiming, null, 2)}
-
-Real skill build in this match, in order (timing is interpolated from real XP data, marked with ~):
-${JSON.stringify(levelsWithTiming, null, 2)}`;
 }

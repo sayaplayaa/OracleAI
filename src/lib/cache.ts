@@ -19,3 +19,10 @@ export async function cached<T>(
   store.set(key, { value, expiresAt: Date.now() + ttlMs });
   return value;
 }
+
+/** Drops a cached entry so the next `cached()` call for it re-fetches - for
+ * when we know the underlying data just changed (e.g. a replay just got
+ * parsed), not just when the TTL happens to expire. */
+export function invalidate(key: string): void {
+  store.delete(key);
+}

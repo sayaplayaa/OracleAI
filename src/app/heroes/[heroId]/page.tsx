@@ -6,7 +6,9 @@ import { getHeroAbilityKit } from "@/lib/heroAbilities";
 import { getHeroInternalName, getHeroName, getHeroPrimaryAttr } from "@/lib/constants";
 import { computeHeroRoleOverview } from "@/lib/metrics/heroBuild";
 import { computeDraftInsights } from "@/lib/metrics/draftInsights";
+import { pluralRu } from "@/lib/format";
 import { HeroSplashHeader } from "@/components/HeroSplashHeader";
+import { attributeNameRu } from "@/components/AttributeBadge";
 import { HeroAbilityList } from "@/components/HeroAbilityList";
 import { MatchupList } from "@/components/MatchupList";
 import { HeroGuidePanel } from "@/components/HeroGuidePanel";
@@ -36,27 +38,27 @@ export default async function HeroGuidePage({
       <div className="space-y-6">
         <HeroSplashHeader
           heroId={heroId}
-          eyebrow="Hero Guide"
+          eyebrow="Гайд по герою"
           title={getHeroName(heroId)}
-          subtitle={getHeroPrimaryAttr(heroId).toUpperCase()}
+          subtitle={attributeNameRu(getHeroPrimaryAttr(heroId))}
         >
           <Link
             href={`/drafts?hero=${heroId}`}
             className="text-xs text-accent hover:underline whitespace-nowrap"
           >
-            Full item build & talents in Hero Explorer &rarr;
+            Полная сборка и таланты в «Обзоре героя» &rarr;
           </Link>
         </HeroSplashHeader>
 
         <div>
-          <h2 className="text-sm font-semibold text-ink mb-3">Ability kit</h2>
+          <h2 className="text-sm font-semibold text-ink mb-3">Способности</h2>
           <HeroAbilityList abilities={abilities} />
         </div>
 
         {roleOverview.roles.length > 0 && (
           <div>
             <h2 className="text-sm font-semibold text-ink mb-3">
-              Role win rates (current week, STRATZ)
+              Винрейт по ролям (эта неделя, STRATZ)
             </h2>
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
               {roleOverview.roles.map((r) => (
@@ -66,7 +68,8 @@ export default async function HeroGuidePage({
                 >
                   <div className="text-sm font-semibold text-ink">{r.roleLabel}</div>
                   <div className="text-xs font-mono text-ink-muted">
-                    {r.games.toLocaleString()} ·{" "}
+                    {r.games.toLocaleString("ru-RU")}{" "}
+                    {pluralRu(r.games, ["игра", "игры", "игр"])} ·{" "}
                     <span
                       style={{
                         color:
@@ -85,17 +88,17 @@ export default async function HeroGuidePage({
         )}
 
         <div>
-          <h2 className="text-sm font-semibold text-ink mb-3">Matchups</h2>
+          <h2 className="text-sm font-semibold text-ink mb-3">Матчапы</h2>
           <div className="grid sm:grid-cols-2 gap-4">
             <MatchupList
-              title={`${getHeroName(heroId)} struggles against`}
+              title={`Против кого ${getHeroName(heroId)} слаб`}
               matchups={draftInsights.toughestMatchups}
-              emptyMessage="Not enough recorded games against any single hero."
+              emptyMessage="Пока ни против одного героя не набралось достаточно игр."
             />
             <MatchupList
-              title={`${getHeroName(heroId)} dominates`}
+              title={`Против кого ${getHeroName(heroId)} силён`}
               matchups={draftInsights.bestMatchups}
-              emptyMessage="Not enough recorded games against any single hero."
+              emptyMessage="Пока ни против одного героя не набралось достаточно игр."
             />
           </div>
         </div>

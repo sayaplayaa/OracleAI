@@ -13,7 +13,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(new URL("/?error=steam_login_failed", req.nextUrl.origin));
   }
 
-  const response = NextResponse.redirect(new URL(`/player/${accountId}`, req.nextUrl.origin));
+  // The site always opens on the home page; signed in, it adds the player's
+  // latest games and a link to the full list.
+  const response = NextResponse.redirect(new URL("/", req.nextUrl.origin));
   response.cookies.set(SESSION_COOKIE_NAME, createSessionCookieValue(accountId), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",

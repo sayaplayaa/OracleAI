@@ -85,18 +85,18 @@ export function computeRoleComparisons(
     const { radiant, dire } = pair;
 
     const stats: RoleComparisonStat[] = [
-      buildStat("Gold per Min", radiant.gpm, dire.gpm, "gpm"),
-      buildStat("XP per Min", radiant.xpm, dire.xpm, "xpm"),
-      buildStat("Net Worth", radiant.netWorth, dire.netWorth),
-      buildStat("Kills", radiant.kills, dire.kills),
-      buildStat("Deaths", radiant.deaths, dire.deaths, undefined, true),
-      buildStat("Assists", radiant.assists, dire.assists),
-      buildStat("Hero Damage", radiant.heroDamage, dire.heroDamage),
-      buildStat("Hero Healing", radiant.heroHealing, dire.heroHealing),
-      buildStat("Last Hits", radiant.lastHits, dire.lastHits),
-      buildStat("Denies", radiant.denies, dire.denies),
+      buildStat("Золото в минуту", radiant.gpm, dire.gpm, "зол/мин"),
+      buildStat("Опыт в минуту", radiant.xpm, dire.xpm, "оп/мин"),
+      buildStat("Нетворс", radiant.netWorth, dire.netWorth),
+      buildStat("Убийства", radiant.kills, dire.kills),
+      buildStat("Смерти", radiant.deaths, dire.deaths, undefined, true),
+      buildStat("Помощи", radiant.assists, dire.assists),
+      buildStat("Урон по героям", radiant.heroDamage, dire.heroDamage),
+      buildStat("Лечение", radiant.heroHealing, dire.heroHealing),
+      buildStat("Добивания", radiant.lastHits, dire.lastHits),
+      buildStat("Денаи", radiant.denies, dire.denies),
       buildStat(
-        "Wards Placed",
+        "Поставлено вардов",
         radiant.obsPlaced + radiant.senPlaced,
         dire.obsPlaced + dire.senPlaced
       ),

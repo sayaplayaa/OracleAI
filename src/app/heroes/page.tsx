@@ -10,13 +10,13 @@ export default function HeroesGuidesPage() {
     <PageContainer>
       <div className="space-y-2 mb-6">
         <p className="text-xs font-semibold uppercase tracking-wide text-accent">
-          Hero Guides
+          Гайды по героям
         </p>
-        <h1 className="text-2xl font-bold text-ink">Guides</h1>
+        <h1 className="text-2xl font-bold text-ink">Гайды</h1>
         <p className="text-sm text-ink-secondary max-w-2xl">
-          Every hero&apos;s real ability kit, current role win rates, real
-          matchups, and an AI-written guide grounded in that data. Pick a
-          hero to start.
+          Реальные способности каждого героя, текущий винрейт по ролям,
+          матчапы и ИИ-гайд, написанный на основе этих данных. Выбери
+          героя, чтобы начать.
         </p>
       </div>
 

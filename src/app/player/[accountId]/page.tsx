@@ -15,6 +15,7 @@ import { computeTrendMetrics, selectNotableMatches } from "@/lib/metrics/trendMe
 import { findSignatureHero } from "@/lib/metrics/signatureHero";
 import { computeProHeroSpotlight, findProForHero } from "@/lib/metrics/proComparison";
 import { getHeroName, getRankInfo } from "@/lib/constants";
+import { pluralRu } from "@/lib/format";
 import { StatTile } from "@/components/StatTile";
 import { RankTile } from "@/components/RankTile";
 import { MmrTile } from "@/components/MmrTile";
@@ -68,40 +69,48 @@ export default async function PlayerPage({
   // signature hero in a recent tournament game - never a ladder grinder
   // who happens to be tagged pro, and never a fabricated example.
   let proSpotlight = null;
+  let proSpotlightUnavailable = false;
   if (signatureHero) {
-    const [proPlayers, leagueMatches] = await Promise.all([
-      getProPlayers(),
-      getHeroLeagueMatches(signatureHero.hero_id),
-    ]);
-    const found = findProForHero(leagueMatches, proPlayers);
-    if (found) {
-      const [proHeroStats, proMatches] = await Promise.all([
-        getHeroStats(found.pro.accountId),
-        getMatchesForHero(found.pro.accountId, signatureHero.hero_id, 20),
+    // Optional card: the pro roster is a very large response, so a flaky or
+    // throttled connection must not take the whole player page down with it.
+    try {
+      const [proPlayers, leagueMatches] = await Promise.all([
+        getProPlayers(),
+        getHeroLeagueMatches(signatureHero.hero_id),
       ]);
-      const proHeroStat = proHeroStats.find((h) => h.hero_id === signatureHero.hero_id);
-      proSpotlight = computeProHeroSpotlight(
-        signatureHero.hero_id,
-        found.pro,
-        proHeroStat,
-        proMatches,
-        found.leagueGames
-      );
+      const found = findProForHero(leagueMatches, proPlayers);
+      if (found) {
+        const [proHeroStats, proMatches] = await Promise.all([
+          getHeroStats(found.pro.accountId),
+          getMatchesForHero(found.pro.accountId, signatureHero.hero_id, 20),
+        ]);
+        const proHeroStat = proHeroStats.find((h) => h.hero_id === signatureHero.hero_id);
+        proSpotlight = computeProHeroSpotlight(
+          signatureHero.hero_id,
+          found.pro,
+          proHeroStat,
+          proMatches,
+          found.leagueGames
+        );
+      }
+    } catch (err) {
+      if (!(err instanceof OpenDotaError)) throw err;
+      proSpotlightUnavailable = true;
     }
   }
   const lifetimeTotal = winLoss.win + winLoss.lose;
   const lifetimeWinRate = lifetimeTotal > 0 ? winLoss.win / lifetimeTotal : 0;
 
   const overviewContent = trends.sampleSize === 0 ? (
-    <p className="text-ink-secondary">No recent match data found for this player.</p>
+    <p className="text-ink-secondary">Не нашли недавних игр этого игрока.</p>
   ) : (
     <div className="space-y-6">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatTile
-          label={`Win rate (last ${trends.sampleSize})`}
+          label={`Винрейт (последние ${trends.sampleSize})`}
           value={`${Math.round(trends.winRate * 100)}%`}
         />
-        <StatTile label="Avg KDA" value={`${trends.avgKda}`} />
+        <StatTile label="Средний KDA" value={`${trends.avgKda}`} />
         <RankTile rank={rankInfo} />
         <MmrTile rank={rankInfo} />
       </div>
@@ -120,7 +129,7 @@ export default async function PlayerPage({
           <AICoachPanel
             endpoint="/api/coach/trends"
             body={{ accountId, limit: POOL_SIZE }}
-            label="Get AI Trend Report"
+            label="Разбор трендов от ИИ"
           />
         </div>
 
@@ -135,12 +144,14 @@ export default async function PlayerPage({
             ) : (
               <div className="bg-surface border border-border rounded-lg p-4">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-secondary mb-2">
-                  Pro spotlight
+                  Про-игрок на твоём герое
                 </h3>
                 <p className="text-sm text-ink-muted">
-                  {signatureHero
-                    ? "No recent tournament game found for this hero yet."
-                    : "Play a few games to get a signature hero, then see how a pro plays it."}
+                  {proSpotlightUnavailable
+                    ? "Сейчас не получилось загрузить данные про-игроков из OpenDota - попробуй ещё раз через минуту."
+                    : signatureHero
+                      ? "Пока не нашли недавних турнирных игр на этом герое."
+                      : "Сыграй несколько игр, чтобы появился сигнатурный герой, - и посмотри, как на нём играет про-игрок."}
                 </p>
               </div>
             )}
@@ -149,12 +160,13 @@ export default async function PlayerPage({
 
           <div>
             <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-secondary mb-1">
-              Matches worth reviewing
+              Игры, которые стоит разобрать
             </h2>
             <p className="text-xs text-ink-muted mb-3">
-              Picked from your last {trends.sampleSize} games - losses first,
-              then games where KDA or deaths were notably off your average.
-              Full history is in the Match History tab.
+              Выбраны из твоих последних {trends.sampleSize}{" "}
+              {pluralRu(trends.sampleSize, ["игры", "игр", "игр"])} - сначала поражения,
+              потом игры, где KDA или число смертей заметно хуже твоего среднего.
+              Полный список - во вкладке «История игр».
             </p>
             <div className="bg-surface border border-border rounded-lg divide-y divide-border overflow-hidden">
               {notableMatches.map((m) => (
@@ -186,7 +198,10 @@ export default async function PlayerPage({
               {profile.profile.personaname}
             </h1>
             <p className="text-sm text-ink-muted">
-              Lifetime {winLoss.win}W - {winLoss.lose}L (
+              За всё время: {winLoss.win.toLocaleString("ru-RU")}{" "}
+              {pluralRu(winLoss.win, ["победа", "победы", "побед"])} -{" "}
+              {winLoss.lose.toLocaleString("ru-RU")}{" "}
+              {pluralRu(winLoss.lose, ["поражение", "поражения", "поражений"])} (
               {Math.round(lifetimeWinRate * 100)}%)
             </p>
           </div>
@@ -195,16 +210,16 @@ export default async function PlayerPage({
             target="_blank"
             className="ml-auto text-xs text-accent hover:underline"
           >
-            Steam profile ↗
+            Профиль Steam ↗
           </Link>
         </div>
 
         <MatchTabs
           tabs={[
-            { id: "overview", label: "Overview", content: overviewContent },
+            { id: "overview", label: "Обзор", content: overviewContent },
             {
               id: "history",
-              label: "Match History",
+              label: "История игр",
               content: (
                 <MatchHistory accountId={accountId} initialMatches={trends.recentMatches} />
               ),

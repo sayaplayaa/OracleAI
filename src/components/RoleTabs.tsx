@@ -1,3 +1,4 @@
+import { pluralRu } from "@/lib/format";
 import type { RolePickStat } from "@/lib/types";
 
 export function RoleTabs({
@@ -25,7 +26,7 @@ export function RoleTabs({
           >
             <div className="text-sm font-semibold text-ink">{r.roleLabel}</div>
             <div className="text-xs font-mono text-ink-muted">
-              {r.games.toLocaleString()} ·{" "}
+              {r.games.toLocaleString("ru-RU")} {pluralRu(r.games, ["игра", "игры", "игр"])} ·{" "}
               <span
                 style={{
                   color:

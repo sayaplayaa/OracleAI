@@ -14,7 +14,7 @@ export function StatBar({ stat }: { stat: MetricPoint }) {
       <div className="flex items-baseline justify-between gap-2 mb-1.5">
         <span className="text-sm text-ink-secondary">{stat.label}</span>
         <span className="text-sm font-mono text-ink tabular-nums">
-          {stat.value}
+          {typeof stat.value === "number" ? stat.value.toLocaleString("ru-RU") : stat.value}
           {stat.unit ? (
             <span className="text-ink-muted ml-1">{stat.unit}</span>
           ) : null}
@@ -34,11 +34,11 @@ export function StatBar({ stat }: { stat: MetricPoint }) {
           </div>
           <div className="flex justify-between mt-1">
             <span className="text-xs text-ink-muted">
-              {percentile}th percentile for this hero
+              {percentile}-й перцентиль на этом герое
             </span>
             {stat.benchmarkMedian !== undefined && (
               <span className="text-xs text-ink-muted">
-                median {stat.benchmarkMedian}
+                медиана {stat.benchmarkMedian.toLocaleString("ru-RU")}
               </span>
             )}
           </div>

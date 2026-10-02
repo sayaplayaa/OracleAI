@@ -1,4 +1,5 @@
 import { HeroIcon } from "./HeroIcon";
+import { pluralRu } from "@/lib/format";
 import type { HeroMatchup } from "@/lib/types";
 
 export function MatchupList({
@@ -23,7 +24,10 @@ export function MatchupList({
             <li key={m.heroId} className="flex items-center gap-3">
               <HeroIcon heroId={m.heroId} size={28} />
               <span className="text-sm text-ink flex-1 truncate">{m.heroName}</span>
-              <span className="text-xs text-ink-muted font-mono">{m.gamesPlayed}g</span>
+              <span className="text-xs text-ink-muted font-mono">
+                {m.gamesPlayed.toLocaleString("ru-RU")}{" "}
+                {pluralRu(m.gamesPlayed, ["игра", "игры", "игр"])}
+              </span>
               <span
                 className="text-xs font-mono font-semibold w-12 text-right"
                 style={{

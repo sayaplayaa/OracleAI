@@ -7,14 +7,14 @@ export default function RiddlesPage() {
     <PageContainer>
       <div className="space-y-2 mb-6">
         <p className="text-xs font-semibold uppercase tracking-wide text-accent">
-          Game Sense Training
+          Тренировка понимания игры
         </p>
-        <h1 className="text-2xl font-bold text-ink">Dota Riddles</h1>
+        <h1 className="text-2xl font-bold text-ink">Загадки по Dota</h1>
         <p className="text-sm text-ink-secondary max-w-2xl">
-          Scenario-based questions on map awareness, vision, timing, and
-          decision-making - the judgment calls that don&apos;t show up in a
-          single stat, but decide games. Each one comes with a real
-          explanation, not just a right answer.
+          Игровые ситуации на чтение карты, обзор, тайминги и принятие
+          решений - то, что не видно ни в одной цифре статистики, но решает
+          игры. К каждой загадке есть подробное объяснение, а не просто
+          правильный ответ.
         </p>
       </div>
 

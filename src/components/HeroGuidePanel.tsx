@@ -9,29 +9,29 @@ function HeroGuideReportView({ report }: { report: HeroGuideReport }) {
     <div className="bg-surface border border-border rounded-lg p-5 space-y-5">
       <div>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-secondary mb-2">
-          AI Hero Guide
+          ИИ-гайд по герою
         </h2>
         <p className="text-ink leading-relaxed">{report.identity}</p>
       </div>
 
       <div className="grid gap-5 sm:grid-cols-2">
         <FindingList
-          title="Laning"
+          title="Линия"
           findings={report.laningTips}
           accent="var(--color-accent)"
         />
         <FindingList
-          title="Power spikes"
+          title="Пики силы"
           findings={report.powerSpikeTips}
           accent="var(--color-status-good)"
         />
         <FindingList
-          title="Teamfighting"
+          title="Командные драки"
           findings={report.teamfightTips}
           accent="var(--color-series-blue)"
         />
         <FindingList
-          title="Matchups"
+          title="Матчапы"
           findings={report.matchupTips}
           accent="var(--color-status-critical)"
         />
@@ -55,10 +55,10 @@ export function HeroGuidePanel({ heroId }: { heroId: number }) {
         body: JSON.stringify({ heroId }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "AI hero guide failed");
+      if (!res.ok) throw new Error(data.error ?? "Не удалось создать ИИ-гайд");
       setReport(data as HeroGuideReport);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "AI hero guide failed");
+      setError(err instanceof Error ? err.message : "Не удалось создать ИИ-гайд");
     } finally {
       setLoading(false);
     }
@@ -69,16 +69,16 @@ export function HeroGuidePanel({ heroId }: { heroId: number }) {
   return (
     <div className="bg-surface border border-border rounded-lg p-5 flex flex-col items-start gap-3">
       <p className="text-sm text-ink-secondary max-w-prose">
-        Generate a written guide grounded in this hero&apos;s real ability
-        kit and the role/matchup stats above - every tip cites a real
-        ability effect or number.
+        ИИ напишет гайд на основе реальных способностей героя и статистики
+        по ролям и матчапам выше - каждый совет опирается на настоящий
+        эффект способности или цифру.
       </p>
       <button
         onClick={run}
         disabled={loading}
         className="bg-accent hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-md transition"
       >
-        {loading ? "Writing guide..." : "Generate AI hero guide"}
+        {loading ? "Пишу гайд..." : "Создать ИИ-гайд по герою"}
       </button>
       {error && <p className="text-sm text-status-critical">{error}</p>}
     </div>

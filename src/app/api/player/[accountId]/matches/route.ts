@@ -9,7 +9,7 @@ export async function GET(
   const { accountId: accountIdParam } = await params;
   const accountId = Number(accountIdParam);
   if (!Number.isInteger(accountId) || accountId <= 0) {
-    return NextResponse.json({ error: "Invalid account id" }, { status: 400 });
+    return NextResponse.json({ error: "Некорректный id аккаунта" }, { status: 400 });
   }
 
   const limit = Number(req.nextUrl.searchParams.get("limit")) || 20;
@@ -23,7 +23,7 @@ export async function GET(
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to load matches" },
+      { error: err instanceof Error ? err.message : "Не удалось загрузить матчи" },
       { status: 502 }
     );
   }

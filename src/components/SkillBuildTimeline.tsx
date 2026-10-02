@@ -9,7 +9,7 @@ function formatMatchTime(seconds: number): string {
 
 export function SkillBuildTimeline({ skillBuild }: { skillBuild: SkillBuildEntry[] }) {
   if (skillBuild.length === 0) {
-    return <p className="text-sm text-ink-muted">No parsed skill build for this player.</p>;
+    return <p className="text-sm text-ink-muted">Нет разобранной прокачки скиллов для этого игрока.</p>;
   }
 
   return (

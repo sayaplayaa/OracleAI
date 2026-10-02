@@ -9,7 +9,7 @@ export async function GET(
   const { accountId: accountIdParam } = await params;
   const accountId = Number(accountIdParam);
   if (!Number.isInteger(accountId) || accountId <= 0) {
-    return NextResponse.json({ error: "Invalid account id" }, { status: 400 });
+    return NextResponse.json({ error: "Некорректный id аккаунта" }, { status: 400 });
   }
 
   const limitParam = Number(req.nextUrl.searchParams.get("limit"));
@@ -24,7 +24,7 @@ export async function GET(
     return NextResponse.json(trends);
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to load trends" },
+      { error: err instanceof Error ? err.message : "Не удалось загрузить тренды" },
       { status: 502 }
     );
   }

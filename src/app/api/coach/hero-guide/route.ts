@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
   const heroId = Number(body?.heroId);
 
   if (!Number.isInteger(heroId) || heroId <= 0) {
-    return NextResponse.json({ error: "Invalid heroId" }, { status: 400 });
+    return NextResponse.json({ error: "Некорректный heroId" }, { status: 400 });
   }
 
   try {
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(report);
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "AI hero guide failed" },
+      { error: err instanceof Error ? err.message : "ИИ не смог составить гайд по герою" },
       { status: 502 }
     );
   }

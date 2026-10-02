@@ -8,7 +8,7 @@ function PowerSpikeReportView({ report }: { report: PowerSpikeReport }) {
     <div className="bg-surface border border-border rounded-lg p-5 space-y-4">
       <div>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-secondary mb-2">
-          Power Spikes
+          Пики силы
         </h2>
         <p className="text-ink leading-relaxed">{report.summary}</p>
       </div>
@@ -53,10 +53,10 @@ export function PowerSpikePanel({ matchId, accountId }: { matchId: number; accou
         body: JSON.stringify({ matchId, accountId }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Power Spike analysis failed");
+      if (!res.ok) throw new Error(data.error ?? "Не удалось найти пики силы");
       setReport(data as PowerSpikeReport);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Power Spike analysis failed");
+      setError(err instanceof Error ? err.message : "Не удалось найти пики силы");
     } finally {
       setLoading(false);
     }
@@ -67,15 +67,15 @@ export function PowerSpikePanel({ matchId, accountId }: { matchId: number; accou
   return (
     <div className="bg-surface border border-border rounded-lg p-5 flex flex-col items-start gap-3">
       <p className="text-sm text-ink-secondary max-w-prose">
-        Find this player&apos;s real power-spike moments in this match -
-        which item/level gave them an edge, why, and what to do with it.
+        Найди реальные пики силы этого игрока в матче: какой предмет или
+        уровень дал ему преимущество, почему и как этим пользоваться.
       </p>
       <button
         onClick={run}
         disabled={loading}
         className="bg-accent hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-md transition"
       >
-        {loading ? "Analyzing..." : "Find power spikes"}
+        {loading ? "Анализирую..." : "Найти пики силы"}
       </button>
       {error && <p className="text-sm text-status-critical">{error}</p>}
     </div>

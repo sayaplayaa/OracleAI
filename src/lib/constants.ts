@@ -6,8 +6,8 @@ import {
   lobby_type as lobbyTypes,
   patch as patches,
   ability_ids as abilityIds,
-  hero_abilities as heroAbilities,
   abilities,
+  hero_abilities as heroAbilities,
 } from "dotaconstants";
 import type { HeroSummary } from "./types";
 
@@ -28,6 +28,8 @@ type ItemConst = {
   id: number;
   dname?: string;
   desc?: string;
+  notes?: string;
+  attrib?: { display?: string; value?: string | string[] }[];
   img: string;
   cost?: number;
   tier?: number;
@@ -41,11 +43,10 @@ const heroAbilitiesByName = heroAbilities as unknown as Record<
   string,
   { talents: { name: string; level: number }[] }
 >;
-const abilitiesByName = abilities as unknown as Record<string, { dname?: string }>;
 
 export function getHeroName(heroId: number): string {
   const hero = heroes[String(heroId)];
-  return hero?.localized_name ?? hero?.name?.replace("npc_dota_hero_", "") ?? `Hero ${heroId}`;
+  return hero?.localized_name ?? hero?.name?.replace("npc_dota_hero_", "") ?? `Герой ${heroId}`;
 }
 
 export function getHeroIcon(heroId: number): string {
@@ -60,6 +61,14 @@ export function getHeroImage(heroId: number): string {
 
 export function getHeroPrimaryAttr(heroId: number): string {
   return heroes[String(heroId)]?.primary_attr ?? "";
+}
+
+// Every real (non-recipe) item's display name and gold cost - used to catch a
+// model naming an item this match's data never mentions.
+export function getAllItems(): { name: string; cost: number }[] {
+  return Object.entries(itemsByKey)
+    .filter(([key, item]) => !key.startsWith("recipe_") && item.dname)
+    .map(([, item]) => ({ name: item.dname as string, cost: item.cost ?? 0 }));
 }
 
 export function getItemNameByKey(key: string): string {
@@ -84,20 +93,65 @@ export function getItemDescription(itemKey: string): string {
   return itemsByKey[itemKey]?.desc ?? "";
 }
 
+/**
+ * Real item effect text for the coach prompts. dotaconstants leaves `desc`
+ * empty for almost every item in the current data set (verified: phase_boots,
+ * blades_of_attack, wraith_band, power_treads, magic_wand, yasha and manta
+ * all have an empty desc) - handing the model that blank string was an open
+ * invitation to invent an effect from its own (unreliable) memory. `attrib`
+ * (the real numeric bonuses, e.g. "+50 Movement Speed") is populated for
+ * almost every item, so it's used to build a real description when `desc`
+ * and `notes` are both empty. Returns "" only when no real text exists at
+ * all - callers must treat that as "no official effect available", not omit
+ * the check.
+ */
+export function getItemEffectText(itemKey: string): string {
+  const item = itemsByKey[itemKey];
+  if (!item) return "";
+  if (item.desc) return item.desc;
+
+  const fromAttrib = (item.attrib ?? [])
+    .filter((a) => a.display)
+    .map((a) => {
+      const value = Array.isArray(a.value) ? a.value.join("/") : a.value ?? "";
+      return a.display!.replace("{value}", value);
+    })
+    .filter((line) => line.trim().length > 0)
+    .join(", ");
+  if (fromAttrib) return fromAttrib;
+
+  return item.notes ?? "";
+}
+
 export function getAbilityNameById(abilityId: number): string | null {
   return abilityNameById[String(abilityId)] ?? null;
 }
 
-/** Human-readable talent text, e.g. "+10 Strength" - straight from Dota's own ability data. */
-export function getAbilityDisplayName(internalName: string): string {
-  return abilitiesByName[internalName]?.dname ?? internalName;
+/** An ability's in-game (English) name by its numeric id, e.g. 5391 -> "Arcane Orb". */
+export function getAbilityDisplayNameById(abilityId: number): string | null {
+  const key = abilityNameById[String(abilityId)];
+  if (!key) return null;
+  return (abilities as unknown as Record<string, { dname?: string }>)[key]?.dname ?? null;
 }
+
+/** An item's in-game (English) name by its numeric id, e.g. 534 -> "Witch Blade". */
+export function getItemNameById(itemId: number): string | null {
+  const key = itemKeyById[String(itemId)];
+  return key ? (itemsByKey[key]?.dname ?? null) : null;
+}
+
+
+// dotaconstants numbers talent tiers 1-4; the game unlocks them at hero levels 10/15/20/25.
+const TALENT_TIER_LEVELS = [10, 15, 20, 25];
 
 /** Ordered talent list for a hero: 8 entries, two per level (10/15/20/25). */
 export function getHeroTalents(heroId: number): { name: string; level: number }[] {
   const hero = heroes[String(heroId)];
   if (!hero) return [];
-  return heroAbilitiesByName[hero.name]?.talents ?? [];
+  return (heroAbilitiesByName[hero.name]?.talents ?? []).map((t) => ({
+    name: t.name,
+    level: t.level >= 1 && t.level <= 4 ? TALENT_TIER_LEVELS[t.level - 1] : t.level,
+  }));
 }
 
 /** dotaconstants' internal hero key (e.g. "npc_dota_hero_antimage"), used to look up its ability kit. */
@@ -120,12 +174,12 @@ const patchesById = patches as unknown as { name: string; id: number }[];
 
 export function getGameModeName(gameModeId: number): string {
   const mode = gameModesById[String(gameModeId)];
-  return mode ? prettifyConstName(mode.name, "game_mode_") : "Unknown mode";
+  return mode ? prettifyConstName(mode.name, "game_mode_") : "Неизвестный режим";
 }
 
 export function getLobbyTypeName(lobbyTypeId: number): string {
   const lobby = lobbyTypesById[String(lobbyTypeId)];
-  return lobby ? prettifyConstName(lobby.name, "lobby_type_") : "Unknown lobby";
+  return lobby ? prettifyConstName(lobby.name, "lobby_type_") : "Неизвестное лобби";
 }
 
 export function getPatchName(patchId: number | undefined): string | null {
@@ -143,16 +197,18 @@ export function getPatchName(patchId: number | undefined): string | null {
 // distribution data - not officially published by Valve either, but the
 // best available mapping, and it's only used to place a real number on the
 // ladder, not to invent the number itself.
+// Official Russian Dota client medal names (Herald, Guardian, Crusader,
+// Archon, Legend, Ancient, Divine, Immortal).
 const RANK_MEDALS = [
   "",
-  "Herald",
-  "Guardian",
-  "Crusader",
-  "Archon",
-  "Legend",
-  "Ancient",
-  "Divine",
-  "Immortal",
+  "Рекрут",
+  "Страж",
+  "Рыцарь",
+  "Герой",
+  "Легенда",
+  "Властелин",
+  "Божество",
+  "Титан",
 ];
 
 const RANK_COLORS: Record<number, string> = {
@@ -203,7 +259,7 @@ export interface RankInfo {
   mmr: number;
   medal: string;
   star: number | null;
-  label: string; // e.g. "Divine 3" or "Immortal"
+  label: string; // e.g. "Божество 3" or "Титан"
   color: string;
   mmrToNextRank: number | null; // null only at the very top of the ladder
   nextRankLabel: string | null;

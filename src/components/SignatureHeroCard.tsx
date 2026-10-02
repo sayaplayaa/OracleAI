@@ -1,4 +1,5 @@
 import { getHeroImage } from "@/lib/constants";
+import { pluralRu } from "@/lib/format";
 import { TiltCard } from "./TiltCard";
 import { AICoachPanel } from "./AICoachPanel";
 
@@ -33,11 +34,11 @@ export function SignatureHeroCard({
         />
         <div className="relative h-full flex flex-col justify-end p-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-accent mb-1">
-            Signature hero
+            Сигнатурный герой
           </p>
           <h3 className="text-xl font-bold text-ink drop-shadow">{heroName}</h3>
           <p className="text-xs text-ink-secondary mt-1">
-            {games.toLocaleString()} games ·{" "}
+            {games.toLocaleString("ru-RU")} {pluralRu(games, ["игра", "игры", "игр"])} ·{" "}
             <span
               className="font-semibold"
               style={{
@@ -47,7 +48,7 @@ export function SignatureHeroCard({
                     : "var(--color-status-critical)",
               }}
             >
-              {Math.round(winRate * 100)}% win rate
+              винрейт {Math.round(winRate * 100)}%
             </span>
           </p>
         </div>
@@ -55,7 +56,7 @@ export function SignatureHeroCard({
       <AICoachPanel
         endpoint="/api/coach/hero"
         body={{ accountId, heroId }}
-        label={`Get tips for ${heroName}`}
+        label={`Советы по игре на ${heroName}`}
       />
     </div>
   );

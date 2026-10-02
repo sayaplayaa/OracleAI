@@ -7,10 +7,10 @@ import type {
 } from "../types";
 
 const LANE_ROLE_NAMES: Record<number, string> = {
-  1: "Safe Lane",
-  2: "Mid Lane",
-  3: "Off Lane",
-  4: "Jungle",
+  1: "Сейфлейн",
+  2: "Мид",
+  3: "Оффлейн",
+  4: "Лес",
 };
 
 const MIN_GAMES_FOR_HERO_RANKING = 3;
@@ -102,7 +102,7 @@ export function computeTrendMetrics(
   const roleDistribution: Record<string, number> = {};
   for (const m of matches) {
     if (!m.lane_role) continue;
-    const name = LANE_ROLE_NAMES[m.lane_role] ?? "Unknown";
+    const name = LANE_ROLE_NAMES[m.lane_role] ?? "Неизвестно";
     roleDistribution[name] = (roleDistribution[name] ?? 0) + 1;
   }
 

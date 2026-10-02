@@ -3,6 +3,7 @@ import type { StratzMatchPlayerPosition } from "./types";
 
 const STRATZ_URL = "https://api.stratz.com/graphql";
 const HOUR = 60 * 60 * 1000;
+const REQUEST_TIMEOUT_MS = 15_000;
 
 export interface StratzLaneOutcome {
   heroId1: number;
@@ -32,28 +33,41 @@ export class StratzError extends Error {
 async function graphql<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
   const key = process.env.STRATZ_API_KEY;
   if (!key) {
-    throw new StratzError("STRATZ_API_KEY is not set.");
+    throw new StratzError("Не задан STRATZ_API_KEY.");
   }
 
-  const res = await fetch(STRATZ_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${key}`,
-      // STRATZ blocks requests without an identifying User-Agent behind its
-      // Cloudflare bot challenge, even with a valid token.
-      "User-Agent": "STRATZ_API",
-    },
-    body: JSON.stringify({ query, variables }),
-  });
+  let json;
+  try {
+    const res = await fetch(STRATZ_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${key}`,
+        // STRATZ blocks requests without an identifying User-Agent behind its
+        // Cloudflare bot challenge, even with a valid token.
+        "User-Agent": "STRATZ_API",
+      },
+      body: JSON.stringify({ query, variables }),
+      // A stalled connection never errors on its own - without a deadline fetch hangs for minutes.
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
 
-  if (!res.ok) {
-    throw new StratzError(`STRATZ request failed (${res.status})`);
+    if (!res.ok) {
+      throw new StratzError(`Не удался запрос к STRATZ (${res.status})`);
+    }
+
+    json = await res.json();
+  } catch (err) {
+    if (err instanceof StratzError) throw err;
+    const timedOut = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+    throw new StratzError(
+      timedOut
+        ? `STRATZ не отвечает дольше ${REQUEST_TIMEOUT_MS / 1000} с (соединение зависло)`
+        : `Не удался запрос к STRATZ: ${err instanceof Error ? err.message : "ошибка сети"}`
+    );
   }
-
-  const json = await res.json();
   if (json.errors) {
-    throw new StratzError(json.errors[0]?.message ?? "STRATZ GraphQL error");
+    throw new StratzError(json.errors[0]?.message ?? "Ошибка GraphQL STRATZ");
   }
   return json.data as T;
 }
@@ -104,9 +118,75 @@ export function getMatchPlayerPositions(matchId: number) {
       { id: matchId }
     );
     if (!data.match) {
-      throw new StratzError(`STRATZ has no data for match ${matchId}`);
+      throw new StratzError(`У STRATZ нет данных по матчу ${matchId}`);
     }
     return data.match.players;
+  });
+}
+
+// One death as STRATZ's replay parser records it. Positions are on the same
+// ~64-192 grid as OpenDota's ward logs; the flags are STRATZ's own analysis
+// of the moment (walked through an enemy ward's vision, tried to TP out...).
+export interface StratzDeathEvent {
+  time: number;
+  attacker: number | null;
+  byAbility: number | null;
+  byItem: number | null;
+  timeDead: number | null;
+  goldLost: number | null;
+  positionX: number | null;
+  positionY: number | null;
+  assist: number[] | null;
+  isWardWalkThrough: boolean | null;
+  isAttemptTpOut: boolean | null;
+  isBurst: boolean | null;
+  isEngagedOnDeath: boolean | null;
+  hasHealAvailable: boolean | null;
+  isTracked: boolean | null;
+}
+
+export interface StratzPlayerDeaths {
+  heroId: number;
+  isRadiant: boolean;
+  deathEvents: StratzDeathEvent[];
+}
+
+/**
+ * Every player's real death events (exact map position, killing ability or
+ * item, assisting heroes) for one match. Best-effort like the positions
+ * query: throws when STRATZ hasn't parsed the replay yet, so an empty result
+ * is never cached for a match it will have data for later.
+ */
+export function getMatchDeathEvents(matchId: number) {
+  return cached(`stratz:match-deaths:${matchId}`, 24 * HOUR, async () => {
+    const data = await graphql<{
+      match: {
+        players: { heroId: number; isRadiant: boolean; stats: { deathEvents: StratzDeathEvent[] | null } | null }[];
+      } | null;
+    }>(
+      `query MatchDeaths($id: Long!) {
+        match(id: $id) {
+          players {
+            heroId
+            isRadiant
+            stats {
+              deathEvents {
+                time attacker byAbility byItem timeDead goldLost positionX positionY assist
+                isWardWalkThrough isAttemptTpOut isBurst isEngagedOnDeath hasHealAvailable isTracked
+              }
+            }
+          }
+        }
+      }`,
+      { id: matchId }
+    );
+    const players = data.match?.players ?? [];
+    if (!players.some((p) => (p.stats?.deathEvents?.length ?? 0) > 0)) {
+      throw new StratzError(`У STRATZ ещё нет разобранных смертей матча ${matchId}`);
+    }
+    return players.map(
+      (p): StratzPlayerDeaths => ({ heroId: p.heroId, isRadiant: p.isRadiant, deathEvents: p.stats?.deathEvents ?? [] })
+    );
   });
 }
 
@@ -138,15 +218,25 @@ export interface StratzTalentStat {
   winCount: number;
 }
 
+// STRATZ's position stats pool every public bracket by default, including
+// Herald/Guardian, where off-meta/troll picks (e.g. a support hero bought
+// as a "carry") are common enough to show up as real-looking sample sizes -
+// restricting to Legend+ is what separates real emerging-meta picks from
+// pub noise. Verified directly against STRATZ: Crystal Maiden's "Position 1"
+// sample drops from 433 games (all brackets) to 98 (Legend+) and its win
+// rate drops to a clearly-not-viable 34%, confirming the bracket - not the
+// game count - was letting the noise through.
+const META_BRACKETS = ["LEGEND_ANCIENT", "DIVINE_IMMORTAL"];
+
 /** Real pick/win rate per position (1-5), for the hero's role tabs. */
 export function getHeroPositionStats(heroId: number) {
-  return cached(`stratz:hero-positions:${heroId}`, 6 * HOUR, async () => {
+  return cached(`stratz:hero-positions:${heroId}:v2`, 6 * HOUR, async () => {
     const data = await graphql<{
       heroStats: { stats: StratzHeroPositionStat[] };
     }>(
-      `query HeroPositionStats($heroId: Short!) {
+      `query HeroPositionStats($heroId: Short!, $brackets: [RankBracketBasicEnum]) {
         heroStats {
-          stats(heroIds: [$heroId], groupByPosition: true) {
+          stats(heroIds: [$heroId], groupByPosition: true, bracketBasicIds: $brackets) {
             heroId
             position
             matchCount
@@ -154,15 +244,15 @@ export function getHeroPositionStats(heroId: number) {
           }
         }
       }`,
-      { heroId }
+      { heroId, brackets: META_BRACKETS }
     );
     return data.heroStats.stats;
   });
 }
 
-const ALL_HERO_STATS_QUERY = `query AllHeroPositionStats($heroIds: [Short]) {
+const ALL_HERO_STATS_QUERY = `query AllHeroPositionStats($heroIds: [Short], $brackets: [RankBracketBasicEnum]) {
   heroStats {
-    stats(heroIds: $heroIds, groupByPosition: true) {
+    stats(heroIds: $heroIds, groupByPosition: true, bracketBasicIds: $brackets) {
       heroId
       position
       matchCount
@@ -180,7 +270,7 @@ const HERO_STATS_BATCH_SIZE = 20;
  * to resolve field 'stats'"), so this chunks the request and merges results.
  */
 export function getAllHeroStats(heroIds: number[]) {
-  return cached(`stratz:all-hero-positions`, 6 * HOUR, async () => {
+  return cached(`stratz:all-hero-positions:v2`, 6 * HOUR, async () => {
     const batches: number[][] = [];
     for (let i = 0; i < heroIds.length; i += HERO_STATS_BATCH_SIZE) {
       batches.push(heroIds.slice(i, i + HERO_STATS_BATCH_SIZE));
@@ -190,7 +280,7 @@ export function getAllHeroStats(heroIds: number[]) {
     for (const batch of batches) {
       const data = await graphql<{
         heroStats: { stats: StratzHeroPositionStat[] };
-      }>(ALL_HERO_STATS_QUERY, { heroIds: batch });
+      }>(ALL_HERO_STATS_QUERY, { heroIds: batch, brackets: META_BRACKETS });
       results.push(...data.heroStats.stats);
     }
     return results;
@@ -237,6 +327,15 @@ export function getHeroBuild(heroId: number, position: string) {
       }`,
       { heroId, positions: [position] }
     );
-    return data.heroStats;
+    // STRATZ returns null (not []) for a field when a hero+position combo
+    // has no real data at all (e.g. an off-meta position for that hero) -
+    // normalize here, at the boundary, so every caller can trust these are
+    // real arrays instead of each needing its own null guard.
+    return {
+      startingItems: data.heroStats.startingItems ?? [],
+      fullPurchases: data.heroStats.fullPurchases ?? [],
+      neutralItems: data.heroStats.neutralItems ?? [],
+      talents: data.heroStats.talents ?? [],
+    };
   });
 }

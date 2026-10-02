@@ -2,12 +2,12 @@ import { ItemIcon } from "./ItemIcon";
 import type { ItemProgressionPoint } from "@/lib/types";
 
 function formatTime(seconds: number): string {
-  return `${Math.round(seconds / 60)}m`;
+  return `${Math.round(seconds / 60)} мин`;
 }
 
 export function ItemTimeline({ items }: { items: ItemProgressionPoint[] }) {
   if (items.length === 0) {
-    return <p className="text-sm text-ink-muted">Not enough data for this role yet.</p>;
+    return <p className="text-sm text-ink-muted">Для этой роли пока мало данных.</p>;
   }
 
   return (

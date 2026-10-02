@@ -4,13 +4,13 @@ const RADIANT_GREEN = "var(--color-status-good)";
 const DIRE_RED = "var(--color-status-critical)";
 
 const TYPE_LABELS: Record<MatchStoryEventType, string> = {
-  first_blood: "First Blood",
-  tower: "Tower",
-  barracks: "Barracks",
+  first_blood: "Первая кровь",
+  tower: "Башня",
+  barracks: "Бараки",
   roshan: "Roshan",
-  teamfight: "Teamfight",
-  swing: "Momentum",
-  multi_kill: "Multi-kill",
+  teamfight: "Тимфайт",
+  swing: "Перелом",
+  multi_kill: "Мульти-килл",
 };
 
 function formatClock(seconds: number): string {
@@ -23,11 +23,11 @@ function formatClock(seconds: number): string {
 export function MatchStoryTimeline({ story }: { story: MatchStory }) {
   return (
     <div className="bg-surface border border-border rounded-lg p-5">
-      <h3 className="text-sm font-semibold text-ink-secondary mb-4">Key moments</h3>
+      <h3 className="text-sm font-semibold text-ink-secondary mb-4">Ключевые моменты</h3>
 
       {story.events.length === 0 ? (
         <p className="text-sm text-ink-muted">
-          No objective/teamfight data available for this match.
+          По этой игре нет данных о зданиях, Roshan и тимфайтах.
         </p>
       ) : (
         <ol className="space-y-3">
@@ -60,7 +60,7 @@ export function MatchStoryTimeline({ story }: { story: MatchStory }) {
       {story.highlights.length > 0 && (
         <div className="mt-5 pt-4 border-t border-border">
           <h4 className="text-xs font-semibold uppercase tracking-wide text-ink-secondary mb-2">
-            Highlights
+            Яркие моменты
           </h4>
           <ul className="space-y-1">
             {story.highlights.map((h, i) => (

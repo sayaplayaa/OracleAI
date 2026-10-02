@@ -21,14 +21,14 @@ export default async function TournamentsPage() {
     <PageContainer>
       <div className="space-y-2 mb-6">
         <p className="text-xs font-semibold uppercase tracking-wide text-accent">
-          Tournament Tracker
+          Трекер турниров
         </p>
-        <h1 className="text-2xl font-bold text-ink">Tournaments</h1>
+        <h1 className="text-2xl font-bold text-ink">Турниры</h1>
         <p className="text-sm text-ink-secondary max-w-2xl">
-          Real recent league/tournament results and currently-live
-          tournament games, from OpenDota&apos;s pro match feed. There&apos;s
-          no public schedule of upcoming matches, so this is results and
-          live only - not a fixture list.
+          Свежие результаты лиг и турниров и турнирные матчи, которые идут
+          прямо сейчас, - из ленты профессиональных матчей OpenDota.
+          Публичного расписания будущих матчей нет, поэтому здесь только
+          результаты и лайв, а не календарь игр.
         </p>
       </div>
 
@@ -36,7 +36,7 @@ export default async function TournamentsPage() {
         <div className="mb-8">
           <h2 className="text-sm font-semibold text-ink mb-3 flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-status-critical animate-pulse" />
-            Live now
+            Идут сейчас
           </h2>
           <div className="grid sm:grid-cols-2 gap-3">
             {liveTournamentMatches.map((m) => (
@@ -62,7 +62,7 @@ export default async function TournamentsPage() {
       )}
 
       <div>
-        <h2 className="text-sm font-semibold text-ink mb-3">Recent results</h2>
+        <h2 className="text-sm font-semibold text-ink mb-3">Последние результаты</h2>
         <TournamentResultsList matches={proMatches} />
       </div>
     </PageContainer>

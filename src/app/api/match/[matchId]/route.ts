@@ -11,10 +11,10 @@ export async function GET(
   const accountId = Number(req.nextUrl.searchParams.get("accountId"));
 
   if (!Number.isInteger(matchId) || matchId <= 0) {
-    return NextResponse.json({ error: "Invalid match id" }, { status: 400 });
+    return NextResponse.json({ error: "Некорректный id матча" }, { status: 400 });
   }
   if (!Number.isInteger(accountId) || accountId <= 0) {
-    return NextResponse.json({ error: "Missing or invalid accountId" }, { status: 400 });
+    return NextResponse.json({ error: "Отсутствует или некорректен accountId" }, { status: 400 });
   }
 
   try {
@@ -22,7 +22,7 @@ export async function GET(
     const player = match.players.find((p) => p.account_id === accountId);
     if (!player) {
       return NextResponse.json(
-        { error: "Player did not play in this match" },
+        { error: "Этот игрок не играл в этом матче" },
         { status: 404 }
       );
     }
@@ -33,7 +33,7 @@ export async function GET(
     return NextResponse.json({ match, metrics });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to load match" },
+      { error: err instanceof Error ? err.message : "Не удалось загрузить матч" },
       { status: 502 }
     );
   }

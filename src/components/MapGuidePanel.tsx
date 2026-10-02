@@ -12,7 +12,7 @@ export function MapGuidePanel() {
     <div className="bg-surface border border-border rounded-lg p-4">
       <div className="flex items-center justify-between mb-1">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-secondary">
-          Map Guide
+          Гид по карте
         </h3>
         <span className="text-[11px] font-mono text-ink-muted">{phase.minuteRange}</span>
       </div>
@@ -38,7 +38,7 @@ export function MapGuidePanel() {
       <DotaMapSchematic key={phase.id} pois={phase.pois} />
 
       <p className="text-[11px] text-ink-muted mt-3">
-        Marker positions are approximate guides, not exact in-game coordinates.
+        Метки стоят примерно - это ориентиры, а не точные координаты в игре.
       </p>
     </div>
   );

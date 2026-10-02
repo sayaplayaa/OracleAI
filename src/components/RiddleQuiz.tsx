@@ -47,7 +47,7 @@ export function RiddleQuiz() {
         </span>
         {score.total > 0 && (
           <span className="text-xs font-mono text-ink-muted">
-            {score.correct}/{score.total} correct
+            верно: {score.correct}/{score.total}
           </span>
         )}
       </div>
@@ -99,14 +99,14 @@ export function RiddleQuiz() {
                     : "var(--color-status-critical)",
               }}
             >
-              {selected === riddle.correctIndex ? "Correct" : "Not quite"}
+              {selected === riddle.correctIndex ? "Верно" : "Не совсем"}
             </p>
             <p className="text-sm text-ink-secondary">{riddle.explanation}</p>
             <button
               onClick={next}
               className="mt-4 bg-accent hover:brightness-110 text-page text-sm font-medium px-4 py-2 rounded-md transition"
             >
-              Next riddle
+              Следующая загадка
             </button>
           </div>
         )}

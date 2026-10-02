@@ -12,23 +12,27 @@ number from the match or profile, never invented.
 - Data: [STRATZ GraphQL API](https://stratz.com/api) (optional, key required) - role win rates, item builds/talents, lane synergy, per-match position classification
 - Hero/item/ability metadata: `dotaconstants`
 - Auth: Steam OpenID 2.0 (no API key needed), verified server-side, signed session cookie
-- AI coach: Anthropic Claude (`@anthropic-ai/sdk`), forced structured tool-use output
+- AI coach: local [Ollama](https://ollama.com) running `qwen3:8b`, structured JSON output
 - Charts: `recharts`
 
 ## Setup
 
 ```bash
+ollama pull qwen3:8b
+ollama serve                 # if not already running as a service
 npm install
-cp .env.example .env.local   # then fill in ANTHROPIC_API_KEY and SESSION_SECRET
+cp .env.example .env.local   # then fill in SESSION_SECRET
 npm run dev
 ```
 
 Open http://localhost:3000.
 
-- **`ANTHROPIC_API_KEY`** (required for AI features) - get one at
-  https://console.anthropic.com/. Without it, all stats/trends/pages still
-  work, but every "AI Coach" / "Get tips" / "Get AI Trend Report" action
-  returns an error.
+- **Ollama + `qwen3:8b`** (required for AI features) - install
+  [Ollama](https://ollama.com), run `ollama pull qwen3:8b`, and make sure
+  `ollama serve` is reachable at `http://localhost:11434` (override via
+  `OLLAMA_URL`/`OLLAMA_MODEL` in `.env.local`). Without it, all stats/trends/
+  pages still work, but every "AI Coach" / "Get tips" / "Get AI Trend Report"
+  action returns an error.
 - **`SESSION_SECRET`** (required for Steam login) - any long random string
   used to sign the session cookie, e.g. `openssl rand -hex 32`. It's a local
   secret, not a third-party credential.
@@ -42,16 +46,35 @@ Open http://localhost:3000.
 
 ## How it works
 
-### Home (`/`) and the header
+### The simple flow (what a new player sees)
 
-Home leads with **Sign in through Steam** (real OpenID 2.0, verified
-server-side against Steam - no Steam Web API key needed) behind a small
-parallax/blur decorative background. The header (present on every page) has
-a compact search bar (player by ID/URL/name, or a match ID/link - opens
-under your own signed-in account when you have one, otherwise via the
-account-less `/matches/[matchId]` entry point) and nav to Heroes, Guides,
-Tournaments, Challenges, and Riddles; the logo links to your own profile
-once signed in, or home otherwise.
+The UI is built around four steps, in Russian, with nothing else on screen:
+
+1. **Home (`/`) signed out** - just a **Войти через Steam** button (real
+   OpenID 2.0, verified server-side against Steam - no Steam Web API key
+   needed).
+2. **Home signed in** - the player's own last 20 games (hero, win/loss, KDA,
+   duration); a game whose analysis is already saved on this device is marked
+   "Разбор готов".
+3. **Pick a game -> `/analysis/[matchId]`** - the AI analysis of that game
+   starts immediately (no button): the same grounded match analysis as
+   before (phase-by-phase, compared only with the enemy player on the same
+   position), laid out as *summary -> what to fix first -> what went well ->
+   how each phase went -> details*. It takes 1-2 minutes on the local model,
+   so the page shows progress; finished analyses are cached (server memory
+   for 6 h, and `localStorage` on the device) so reopening a game is instant.
+4. **Подробная статистика** - a button on the analysis page that opens the
+   full data view of that match (`/player/[accountId]/match/[matchId]`).
+
+Everything built before stays, as the **Расширенный режим** (`/advanced`,
+linked from the header): Heroes, Guides, Tournaments, Challenges, Riddles,
+the full player profile and the search bar. Pages in that mode get the full
+header; the simple pages get a bare one. The floating AI Coach button is
+hidden on the simple pages (the analysis is the page itself there) and stays
+on the advanced ones.
+
+The AI report text itself is still English (the analysis facts, principles and
+model prompts are English); only the surrounding interface is Russian.
 
 ### Player profile (`/player/[accountId]`)
 
@@ -80,8 +103,8 @@ once signed in, or home otherwise.
 - **Matches worth reviewing** - a curated 10 out of your last 20 games:
   losses weighted highest, then games where KDA/deaths were notably off your
   own average - not just "most recent."
-- **Get AI Trend Report** - sends the last 20 games' aggregated stats to
-  Claude for a pattern-level report.
+- **Get AI Trend Report** - sends the last 20 games' aggregated stats to the
+  local model for a pattern-level report.
 
 **Match History** tab: the full match list, paginated ("Load more").
 
@@ -197,8 +220,8 @@ positions calibrated by eye against real map landmarks).
 
 The AI is never given free rein: every coach entry point sends a structured
 JSON object of already-computed metrics and gets back a structured report
-(forced tool call) where every strength/weakness/tip cites one of those
-fields.
+(Ollama structured-output schema, run locally against `qwen3:8b`) where every
+strength/weakness/tip cites one of those fields.
 
 ## Known limitations
 
@@ -295,7 +318,7 @@ src/
     riddles.ts, mapGuides.ts        hand-authored coaching content
     challenges.ts, challengeStorage.ts   rule-based challenge generation + localStorage
     metrics/                        raw data -> grounded metrics (match, trend, role comparison, match story, hero build, signature hero, draft insights, pro comparison, tournaments, skill build)
-    coach/                           prompt + schema + Anthropic client for the AI coach
+    coach/                           prompt + schema + Ollama client for the AI coach
   components/                UI
 public/
   minimap.png                the real Dota 2 minimap used on /riddles

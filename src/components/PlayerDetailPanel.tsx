@@ -13,11 +13,13 @@ export function PlayerDetailPanel({
   matchId,
   metrics,
   skillBuild,
+  coreItemKeys,
 }: {
   player: FullMatchPlayer;
   matchId: number;
   metrics: MatchMetrics;
   skillBuild: SkillBuildEntry[];
+  coreItemKeys?: string[];
 }) {
   if (player.accountId === null) return null;
   const accountId = player.accountId;
@@ -38,11 +40,11 @@ export function PlayerDetailPanel({
                   : "var(--color-status-critical)",
               }}
             >
-              {metrics.win ? "Victory" : "Defeat"}
+              {metrics.win ? "Победа" : "Поражение"}
             </span>
           </div>
           <p className="text-xs text-ink-muted">
-            {player.personaname ?? "Anonymous"} · {metrics.role}
+            {player.personaname ?? "Аноним"} · {metrics.role}
           </p>
         </div>
       </div>
@@ -50,7 +52,7 @@ export function PlayerDetailPanel({
       <div className="grid lg:grid-cols-2 gap-4 items-start">
         <div>
           <h4 className="text-xs font-semibold uppercase tracking-wide text-ink-secondary mb-2">
-            Performance vs {player.heroName} benchmarks
+            Сравнение со всеми играми на {player.heroName}
           </h4>
           <div className="divide-y divide-border">
             {metrics.stats.map((stat) => (
@@ -62,13 +64,17 @@ export function PlayerDetailPanel({
         <div className="space-y-4">
           <div>
             <h4 className="text-xs font-semibold uppercase tracking-wide text-ink-secondary mb-2">
-              Item timeline
+              Покупки по времени
             </h4>
-            <MatchItemTimeline items={metrics.itemTimeline} />
+            <MatchItemTimeline
+              items={metrics.itemTimeline}
+              startingItems={metrics.startingItems}
+              coreItemKeys={coreItemKeys}
+            />
           </div>
           <div>
             <h4 className="text-xs font-semibold uppercase tracking-wide text-ink-secondary mb-2">
-              Skill build
+              Прокачка скиллов
             </h4>
             <SkillBuildTimeline skillBuild={skillBuild} />
           </div>
@@ -80,7 +86,7 @@ export function PlayerDetailPanel({
           key={`coach-${accountId}`}
           endpoint="/api/coach/match"
           body={{ matchId, accountId }}
-          label="Find mistakes & strengths"
+          label="Найти ошибки и сильные стороны"
         />
         <PowerSpikePanel key={`spike-${accountId}`} matchId={matchId} accountId={accountId} />
       </div>

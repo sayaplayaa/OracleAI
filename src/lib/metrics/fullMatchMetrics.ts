@@ -15,6 +15,59 @@ import type {
   WardPlacement,
 } from "../types";
 
+// Russian display names by dotaconstants id; anything missing falls back to
+// the (English) dotaconstants name.
+const GAME_MODE_NAMES_RU: Record<number, string> = {
+  0: "Неизвестный режим",
+  1: "All Pick",
+  2: "Captains Mode",
+  3: "Random Draft",
+  4: "Single Draft",
+  5: "All Random",
+  6: "Вступление",
+  7: "Diretide",
+  8: "Reverse Captains Mode",
+  9: "Greeviling",
+  10: "Обучение",
+  11: "Только мид",
+  12: "Least Played",
+  13: "Limited Heroes",
+  14: "Компендиум",
+  15: "Пользовательская игра",
+  16: "Captains Draft",
+  17: "Balanced Draft",
+  18: "Ability Draft",
+  19: "Событие",
+  20: "All Random Deathmatch",
+  21: "1 на 1 на миде",
+  22: "All Pick",
+  23: "Турбо",
+  24: "Мутация",
+  25: "Coaches Challenge",
+};
+
+/** The lobby type the match page treats as "nothing worth mentioning". */
+export const NORMAL_LOBBY_NAME = "Обычная";
+
+const LOBBY_TYPE_NAMES_RU: Record<number, string> = {
+  0: NORMAL_LOBBY_NAME,
+  1: "Лобби",
+  2: "Турнир",
+  3: "Обучение",
+  4: "Против ботов",
+  5: "Рейтинговая (команда)",
+  6: "Рейтинговая (соло)",
+  7: "Рейтинговая",
+  8: "1 на 1 на миде",
+  9: "Battle Cup",
+  10: "Против ботов",
+  11: "Зрители",
+  12: "Событие",
+  13: "Gauntlet",
+  14: "Для новичков",
+  15: "Особый режим",
+};
+
 function buildItemKeys(player: OpenDotaMatchPlayer): string[] {
   const ids = [
     player.item_0,
@@ -56,8 +109,9 @@ function buildPositionHeatmap(
 ): HeatmapCell[] | null {
   if (!lanePos) return null;
   const cells: HeatmapCell[] = [];
-  for (const [y, row] of Object.entries(lanePos)) {
-    for (const [x, count] of Object.entries(row)) {
+  // OpenDota keys this as lane_pos[x][y].
+  for (const [x, column] of Object.entries(lanePos)) {
+    for (const [y, count] of Object.entries(column)) {
       cells.push({ x: Number(x), y: Number(y), count });
     }
   }
@@ -93,6 +147,12 @@ function buildPlayer(player: OpenDotaMatchPlayer): FullMatchPlayer {
     senPlaced: player.sen_placed ?? 0,
     itemKeys: buildItemKeys(player),
     farmTrend: buildFarmTrend(player),
+    series: {
+      netWorth: player.networth_t ?? [],
+      xp: player.xp_t ?? [],
+      lastHits: player.lh_t ?? [],
+      denies: player.dn_t ?? [],
+    },
     observerWards: toWardPlacements(player.obs_log),
     sentryWards: toWardPlacements(player.sen_log),
     positionHeatmap: buildPositionHeatmap(player.lane_pos),
@@ -109,8 +169,8 @@ export function computeFullMatchOverview(match: OpenDotaMatch): FullMatchOvervie
     duration: match.duration,
     radiantScore: match.radiant_score ?? null,
     direScore: match.dire_score ?? null,
-    gameMode: getGameModeName(match.game_mode),
-    lobbyType: getLobbyTypeName(match.lobby_type),
+    gameMode: GAME_MODE_NAMES_RU[match.game_mode] ?? getGameModeName(match.game_mode),
+    lobbyType: LOBBY_TYPE_NAMES_RU[match.lobby_type] ?? getLobbyTypeName(match.lobby_type),
     patch: getPatchName(match.patch),
     isParsed,
     goldAdvTrend: (match.radiant_gold_adv ?? []).map((value, minute) => ({

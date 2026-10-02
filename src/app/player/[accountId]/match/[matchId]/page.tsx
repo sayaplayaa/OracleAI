@@ -3,20 +3,19 @@ import { notFound } from "next/navigation";
 import { getMatch, getBenchmarks, OpenDotaError } from "@/lib/opendota";
 import { getMatchPlayerPositions } from "@/lib/stratz";
 import { computeMatchMetrics } from "@/lib/metrics/matchMetrics";
-import { computeFullMatchOverview } from "@/lib/metrics/fullMatchMetrics";
+import { computeFullMatchOverview, NORMAL_LOBBY_NAME } from "@/lib/metrics/fullMatchMetrics";
 import { computeRoleComparisons } from "@/lib/metrics/roleComparison";
 import { computeMatchStory } from "@/lib/metrics/matchStory";
 import { computeSkillBuild } from "@/lib/metrics/skillBuild";
+import { computeMatchCoreItems } from "@/lib/metrics/matchItemContext";
 import { HeroIcon } from "@/components/HeroIcon";
-import { ItemIcon } from "@/components/ItemIcon";
 import { AttributeBadge } from "@/components/AttributeBadge";
 import { StatBar } from "@/components/StatBar";
 import { StatTile } from "@/components/StatTile";
 import { AICoachPanel } from "@/components/AICoachPanel";
+import { MatchItemTimeline } from "@/components/MatchItemTimeline";
 import { MatchTabs } from "@/components/MatchTabs";
 import { MatchOverviewInteractive, type PlayerDetail } from "@/components/MatchOverviewInteractive";
-import { TeamAdvantageChart } from "@/components/TeamAdvantageChart";
-import { FarmSmallMultiples } from "@/components/FarmSmallMultiples";
 import { WardsMap } from "@/components/WardsMap";
 import { MovementHeatmap } from "@/components/MovementHeatmap";
 import { ParseMatchButton } from "@/components/ParseMatchButton";
@@ -74,18 +73,21 @@ export default async function MatchPage({
   const metrics = computeMatchMetrics(match, accountId, benchmarksByHero.get(player.hero_id) ?? null);
   const fullMatch = computeFullMatchOverview(match);
 
+  // Best-effort: STRATZ gives a real per-match position classifier, but has
+  // shown intermittent failures, so a GPM-rank estimate is always the fallback.
+  const stratzPositions = await getMatchPlayerPositions(matchId).catch(() => null);
+  const coreItemsByAccount = await computeMatchCoreItems(match, stratzPositions);
+
   const playerDetails: Record<number, PlayerDetail> = {};
   for (const p of match.players) {
     if (!p.account_id) continue;
     playerDetails[p.account_id] = {
       metrics: computeMatchMetrics(match, p.account_id, benchmarksByHero.get(p.hero_id) ?? null),
       skillBuild: computeSkillBuild(p, p.hero_id),
+      coreItemKeys: [...(coreItemsByAccount.get(p.account_id) ?? [])],
     };
   }
 
-  // Best-effort: STRATZ gives a real per-match position classifier, but has
-  // shown intermittent failures, so a GPM-rank estimate is always the fallback.
-  const stratzPositions = await getMatchPlayerPositions(matchId).catch(() => null);
   const roleComparisons = computeRoleComparisons(
     fullMatch.radiantPlayers,
     fullMatch.direPlayers,
@@ -101,19 +103,11 @@ export default async function MatchPage({
         playerDetails={playerDetails}
         matchId={matchId}
         focusedAccountId={accountId}
+        goldAdvantage={fullMatch.goldAdvTrend.map((p) => p.value)}
+        xpAdvantage={fullMatch.xpAdvTrend.map((p) => p.value)}
       />
       {fullMatch.isParsed ? (
         <>
-          <div className="grid lg:grid-cols-2 gap-4 items-start">
-            <TeamAdvantageChart
-              goldAdvTrend={fullMatch.goldAdvTrend}
-              xpAdvTrend={fullMatch.xpAdvTrend}
-            />
-            <FarmSmallMultiples
-              radiantPlayers={fullMatch.radiantPlayers}
-              direPlayers={fullMatch.direPlayers}
-            />
-          </div>
           <div className="grid lg:grid-cols-2 gap-4 items-start">
             <WardsMap
               radiantPlayers={fullMatch.radiantPlayers}
@@ -147,7 +141,7 @@ export default async function MatchPage({
                   : "var(--color-status-critical)",
               }}
             >
-              {metrics.win ? "Victory" : "Defeat"}
+              {metrics.win ? "Победа" : "Поражение"}
             </span>
           </div>
           <p className="text-sm text-ink-muted">
@@ -160,23 +154,24 @@ export default async function MatchPage({
         <StatTile
           label="KDA"
           value={`${metrics.kills}/${metrics.deaths}/${metrics.assists}`}
-          sub={`${metrics.kda} ratio`}
+          sub={`коэффициент ${metrics.kda.toLocaleString("ru-RU")}`}
         />
         <StatTile
-          label="Last hits @10"
+          label="Добивания к 10:00"
           value={metrics.lastHitsAt10 !== null ? `${metrics.lastHitsAt10}` : "-"}
         />
-        <StatTile label="Wards placed" value={`${metrics.wardsPlaced}`} />
-        <StatTile label="Buybacks" value={`${metrics.buybacks}`} />
+        <StatTile label="Поставлено вардов" value={`${metrics.wardsPlaced}`} />
+        <StatTile label="Бай-беки" value={`${metrics.buybacks}`} />
       </div>
 
       <div className="grid lg:grid-cols-[2fr_1fr] gap-4 items-start">
         <div className="bg-surface border border-border rounded-lg p-5">
           <h3 className="text-sm font-semibold uppercase tracking-wide text-ink-secondary mb-1">
-            Performance vs {metrics.heroName} benchmarks
+            Сравнение со всеми играми на {metrics.heroName}
           </h3>
           <p className="text-xs text-ink-muted mb-2">
-            Percentile is this game&apos;s rate compared to all recorded {metrics.heroName} games on OpenDota.
+            Перцентиль показывает, как цифра из этой игры выглядит на фоне всех игр на{" "}
+            {metrics.heroName}, записанных в OpenDota.
           </p>
           <div className="divide-y divide-border">
             {metrics.stats.map((stat) => (
@@ -185,29 +180,24 @@ export default async function MatchPage({
           </div>
         </div>
 
-        {metrics.itemTimeline.length > 0 && (
+        {(metrics.itemTimeline.length > 0 || metrics.startingItems.length > 0) && (
           <div className="bg-surface border border-border rounded-lg p-5">
             <h3 className="text-sm font-semibold uppercase tracking-wide text-ink-secondary mb-3">
-              Key item timeline
+              Покупки по времени
             </h3>
-            <div className="flex flex-wrap gap-3">
-              {metrics.itemTimeline.map((item, i) => (
-                <div key={i} className="flex flex-col items-center gap-1">
-                  <ItemIcon itemKey={item.itemKey} size={32} />
-                  <span className="text-[11px] text-ink-muted font-mono">
-                    {formatDuration(item.time)}
-                  </span>
-                </div>
-              ))}
-            </div>
+            <MatchItemTimeline
+              items={metrics.itemTimeline}
+              startingItems={metrics.startingItems}
+              coreItemKeys={playerDetails[accountId]?.coreItemKeys}
+            />
           </div>
         )}
       </div>
 
       <div className="bg-surface border border-border rounded-lg p-4 flex items-center gap-2 text-sm text-ink-secondary">
         <span className="text-accent font-semibold">AI</span>
-        Want a personal breakdown of this match? Open the AI Coach in the
-        bottom-right corner.
+        Хочешь личный разбор этой игры? Открой AI-коуча в правом нижнем
+        углу.
       </div>
     </>
   );
@@ -217,7 +207,7 @@ export default async function MatchPage({
       <div className="space-y-4">
         {roleComparisons.length === 0 ? (
           <p className="text-sm text-ink-muted">
-            Not enough data to build position-by-position comparisons for this match.
+            Не хватает данных, чтобы сравнить игроков по позициям в этом матче.
           </p>
         ) : (
           <div className="grid sm:grid-cols-2 gap-4">
@@ -229,7 +219,7 @@ export default async function MatchPage({
         <AICoachPanel
           endpoint="/api/coach/match-story"
           body={{ matchId }}
-          label="What decided this game?"
+          label="Что решило исход игры?"
         />
       </div>
       <div className="lg:sticky lg:top-20">
@@ -244,13 +234,13 @@ export default async function MatchPage({
         href={`/player/${accountId}`}
         className="text-sm text-accent hover:underline"
       >
-        ← Back to profile
+        ← Назад к профилю
       </Link>
 
       <div className="mt-4 mb-6">
         <HeroSplashHeader
           heroId={metrics.heroId}
-          eyebrow={fullMatch.radiantWin ? "Radiant victory" : "Dire victory"}
+          eyebrow={fullMatch.radiantWin ? "Победа Сил Света" : "Победа Сил Тьмы"}
           accent={
             fullMatch.radiantWin ? "var(--color-status-good)" : "var(--color-status-critical)"
           }
@@ -261,8 +251,8 @@ export default async function MatchPage({
               {fullMatch.radiantScore !== null &&
                 ` · ${fullMatch.radiantScore} - ${fullMatch.direScore}`}
               {` · ${fullMatch.gameMode}`}
-              {fullMatch.lobbyType !== "Normal" && ` (${fullMatch.lobbyType})`}
-              {fullMatch.patch && ` · Patch ${fullMatch.patch}`}
+              {fullMatch.lobbyType !== NORMAL_LOBBY_NAME && ` (${fullMatch.lobbyType})`}
+              {fullMatch.patch && ` · Патч ${fullMatch.patch}`}
             </>
           }
         />
@@ -270,9 +260,9 @@ export default async function MatchPage({
 
       <MatchTabs
         tabs={[
-          { id: "full", label: "Full Match", content: fullMatchContent },
-          { id: "story", label: "Match Story", content: matchStoryContent },
-          { id: "mine", label: "My Performance", content: myPerformanceContent },
+          { id: "full", label: "Весь матч", content: fullMatchContent },
+          { id: "story", label: "Ход игры", content: matchStoryContent },
+          { id: "mine", label: "Моя игра", content: myPerformanceContent },
         ]}
       />
     </PageContainer>

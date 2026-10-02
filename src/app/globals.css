@@ -1,28 +1,31 @@
 @import "tailwindcss";
 
-/* Dense, cool-dark "stat terminal" theme (Dota2ProTracker-inspired):
-   near-black slate surfaces, a teal UI accent for interactive/selected
-   chrome, and a separate olive "top choice" highlight - distinct from the
-   chart-series palette (blue/orange/aqua), which stays as validated. */
+/* "Ancient gold on scorched ground" theme: a warm, near-black backdrop (not
+   blue-black) with Dota's own gold as the primary accent instead of a
+   generic SaaS teal, and a garnet red for losses/critical state instead of a
+   soft pink-red. Chart series colors are kept distinct from both. */
 :root {
   color-scheme: dark;
-  --color-page: #0a0b0d;
-  --color-surface: #13151a;
-  --color-surface-raised: #1a1d24;
-  --color-ink: #f5f6f7;
-  --color-ink-secondary: #a8adb7;
-  --color-ink-muted: #6b7280;
-  --color-border: rgba(255, 255, 255, 0.08);
-  --color-grid: #23262d;
-  --color-baseline: #2b2f38;
-  --color-series-blue: #3987e5;
-  --color-series-orange: #d95926;
-  --color-series-aqua: #199e70;
-  --color-status-good: #0ca30c;
-  --color-status-critical: #e66767;
-  --color-accent: #2dd4bf;
-  --color-highlight-bg: rgba(191, 161, 74, 0.14);
-  --color-highlight-text: #d9c46a;
+  --color-page: #110c0a;
+  --color-surface: #1c1512;
+  --color-surface-raised: #261d18;
+  --color-ink: #f6efe6;
+  --color-ink-secondary: #bba99a;
+  --color-ink-muted: #8a7a6d;
+  --color-border: rgba(255, 214, 170, 0.1);
+  --color-grid: #2c221c;
+  --color-baseline: #3a2d26;
+  --color-series-blue: #5b9bf0;
+  --color-series-orange: #e8783c;
+  --color-series-aqua: #35b38a;
+  --color-status-good: #5cc26a;
+  --color-status-critical: #e5484d;
+  --color-accent: #e8b84b;
+  --color-highlight-bg: rgba(232, 120, 72, 0.16);
+  --color-highlight-text: #f0a868;
+  /* Diverging pair for ahead/behind charts (validated: CVD + contrast on surface). */
+  --color-chart-ahead: #4a8ae0;
+  --color-chart-behind: #e5484d;
 }
 
 @theme inline {
@@ -43,17 +46,73 @@
   --color-accent: var(--color-accent);
   --color-highlight-bg: var(--color-highlight-bg);
   --color-highlight-text: var(--color-highlight-text);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-chart-ahead: var(--color-chart-ahead);
+  --color-chart-behind: var(--color-chart-behind);
+  --font-sans: var(--font-body);
+  --font-display: var(--font-display);
+  --font-mono: var(--font-mono);
 }
 
 body {
-  background: var(--color-page);
+  background:
+    radial-gradient(ellipse 1200px 600px at 50% -10%, rgba(232, 184, 75, 0.07), transparent),
+    var(--color-page);
   color: var(--color-ink);
   font-family: var(--font-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
 ::selection {
   background: var(--color-accent);
-  color: #06231f;
+  color: #1c1309;
+}
+
+/* Content that appears after loading slides in softly instead of popping. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rise-in {
+  animation: rise-in 0.45s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise-in {
+    animation: none;
+  }
+}
+
+/* Horizontal scrollers (recent games strip) hide the native bar but keep scrolling. */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* Endless hero ribbon on the landing page: the list is rendered twice, so
+   sliding by exactly half its width loops seamlessly. */
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.marquee {
+  animation: marquee 60s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marquee {
+    animation: none;
+  }
 }

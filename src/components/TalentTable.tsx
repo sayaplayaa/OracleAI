@@ -1,3 +1,4 @@
+import { pluralRu } from "@/lib/format";
 import type { TalentLevel, TalentOption } from "@/lib/types";
 
 function TalentCell({ option }: { option: TalentOption | undefined }) {
@@ -17,16 +18,16 @@ function TalentCell({ option }: { option: TalentOption | undefined }) {
       </div>
       <div className="text-xs text-ink-muted mt-1 font-mono">
         {option.matchCount > 0
-          ? `${option.matchCount.toLocaleString()} · ${(option.winRate * 100).toFixed(1)}% WR`
-          : "No data"}
+          ? `${option.matchCount.toLocaleString("ru-RU")} ${pluralRu(option.matchCount, ["игра", "игры", "игр"])} · винрейт ${(option.winRate * 100).toFixed(1)}%`
+          : "Нет данных"}
       </div>
       {(option.isTopChoice || option.isHighestWin) && (
         <div className="text-[10px] uppercase tracking-wide text-ink-muted mt-1">
           {option.isTopChoice && option.isHighestWin
-            ? "Most picked · Highest win"
+            ? "Чаще берут · Выше винрейт"
             : option.isTopChoice
-              ? "Most picked"
-              : "Highest win"}
+              ? "Чаще берут"
+              : "Выше винрейт"}
         </div>
       )}
     </div>
@@ -36,7 +37,7 @@ function TalentCell({ option }: { option: TalentOption | undefined }) {
 export function TalentTable({ levels }: { levels: TalentLevel[] }) {
   const hasAnyData = levels.some((l) => l.options.length > 0);
   if (!hasAnyData) {
-    return <p className="text-sm text-ink-muted">Not enough data for this role yet.</p>;
+    return <p className="text-sm text-ink-muted">Для этой роли пока мало данных.</p>;
   }
 
   return (

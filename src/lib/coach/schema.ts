@@ -1,18 +1,20 @@
 // JSON schema for the forced tool-use call that produces a CoachReport.
 // Every finding must carry the specific metric value that grounds it, so the
 // model can't hand-wave a claim without pointing at real match/profile data.
+// Field descriptions are part of what the model reads while generating, so
+// they're in Russian and repeat that every text field is written in Russian.
 
 export const findingSchema = {
   type: "object",
   properties: {
     point: {
       type: "string",
-      description: "The coaching observation or advice, in plain language.",
+      description: "Наблюдение или совет тренера простыми словами, на русском языке.",
     },
     metric: {
       type: "string",
       description:
-        "The exact metric name and value from the provided data that grounds this point (e.g. 'GPM 412, 35th percentile for Pudge').",
+        "Точное название показателя и его значение из данных, на которых основан пункт, на русском (например: «Золото в минуту 412, 35-й перцентиль для Pudge»).",
     },
   },
   required: ["point", "metric"],
@@ -22,28 +24,28 @@ export const findingSchema = {
 export const coachReportTool = {
   name: "submit_coaching_report",
   description:
-    "Submit the structured Dota 2 coaching report. Every strength, weakness, and tip must cite a specific metric from the supplied data.",
+    "Отправить структурированный отчёт тренера по Dota 2 на русском языке. Каждая сильная сторона, слабость и совет должны ссылаться на конкретный показатель из данных.",
   input_schema: {
     type: "object" as const,
     properties: {
       summary: {
         type: "string",
-        description: "2-3 sentence overview of the performance, grounded in the data.",
+        description: "Обзор игры в 2-3 предложениях на русском, основанный на данных.",
       },
       strengths: {
         type: "array",
         items: findingSchema,
-        description: "What the player did well, each grounded in a metric.",
+        description: "Что игрок сделал хорошо, каждый пункт подкреплён показателем.",
       },
       weaknesses: {
         type: "array",
         items: findingSchema,
-        description: "What held the player back, each grounded in a metric.",
+        description: "Что мешало игроку, каждый пункт подкреплён показателем.",
       },
       tips: {
         type: "array",
         items: findingSchema,
-        description: "Concrete, actionable advice tied to the weaknesses found.",
+        description: "Конкретные выполнимые советы, связанные с найденными слабостями.",
       },
     },
     required: ["summary", "strengths", "weaknesses", "tips"],
@@ -51,37 +53,120 @@ export const coachReportTool = {
   },
 };
 
+const phaseNarrativeSchema = (phaseIds: string[]) => ({
+  type: "object",
+  properties: {
+    phase: {
+      type: "string",
+      enum: phaseIds,
+      description: "id фазы, к которой относится запись (как в заголовке фазы).",
+    },
+    whatWentWrong: {
+      type: "string",
+      description:
+        "1-2 предложения на русском: что произошло в этой фазе, с точными числами и временем из фактов. Если фаза выиграна - что сработало.",
+    },
+    decision: {
+      type: "string",
+      description:
+        "ОДНО предложение на русском: решение или привычка, которая к этому привела, с опорой на конкретное время или число из фактов этой фазы (например: «Смерти в 12:06 и 12:46 вне тимфайтов показывают, что ты ходил по карте один без обзора»). Если фаза выиграна - хорошая привычка, которая помогла, тоже с опорой на факт.",
+    },
+    doInstead: {
+      type: "string",
+      description:
+        "Не больше 2 предложений на русском: что делать иначе в следующей игре, конкретно для роли этого игрока и этой фазы.",
+    },
+  },
+  required: ["phase", "whatWentWrong", "decision", "doInstead"],
+  additionalProperties: false,
+});
+
+// The single-match report. When the match has a parsed timeline the model
+// writes only the summary and one narrative entry per game phase reached -
+// strengths and next-game priorities are worked out in code from verified
+// causes. Without a timeline there are no phases, so it also writes those.
+export function buildMatchCoachReportTool(phaseIds: string[]) {
+  const phaseCount = phaseIds.length;
+  const summary = {
+    type: "string",
+    description:
+      "2-3 предложения на русском, обращённые к игроку на «ты»: что решило эту игру и в какой фазе. Без перечисления статистики.",
+  };
+
+  const properties =
+    phaseCount > 0
+      ? {
+          summary,
+          phases: {
+            type: "array",
+            items: phaseNarrativeSchema(phaseIds),
+            minItems: phaseCount,
+            maxItems: phaseCount,
+            description: "Одна запись на каждую фазу, в хронологическом порядке.",
+          },
+        }
+      : {
+          summary,
+          strengths: {
+            type: "array",
+            items: findingSchema,
+            maxItems: 3,
+            description:
+              "Что игрок сделал хорошо для своей роли, каждый пункт подкреплён фактом из данных. Пусто, если ничего не выделялось.",
+          },
+          tips: {
+            type: "array",
+            items: findingSchema,
+            minItems: 1,
+            maxItems: 3,
+            description: "Самое важное, что изменить в следующей игре, каждый пункт подкреплён фактом из данных.",
+          },
+        };
+
+  return {
+    name: "submit_match_coaching_report",
+    description:
+      "Отправить отчёт тренера по Dota 2 на русском языке по одному реальному матчу - по фазам (что пошло не так, какое решение к этому привело, что делать иначе), если есть разбор реплея, - используя только данные факты.",
+    input_schema: {
+      type: "object" as const,
+      properties,
+      required: phaseCount > 0 ? ["summary", "phases"] : ["summary", "strengths", "tips"],
+      additionalProperties: false,
+    },
+  };
+}
+
 export const heroGuideTool = {
   name: "submit_hero_guide",
   description:
-    "Submit a structured Dota 2 hero guide. Every tip must cite a real ability name/effect or a real stat from the supplied data - never invented hero knowledge.",
+    "Отправить структурированный гайд по герою Dota 2 на русском языке. Каждый совет должен ссылаться на реальную способность/эффект или реальный показатель из данных - никаких выдуманных знаний о герое.",
   input_schema: {
     type: "object" as const,
     properties: {
       identity: {
         type: "string",
         description:
-          "2-3 sentences on this hero's fantasy/role, grounded in its actual ability kit.",
+          "2-3 предложения на русском о роли и стиле героя, основанные на его реальном наборе способностей.",
       },
       laningTips: {
         type: "array",
         items: findingSchema,
-        description: "How to play this hero's laning stage, each grounded in a real ability or starting-item stat.",
+        description: "Как играть линию на этом герое, каждый пункт основан на реальной способности или стартовом предмете.",
       },
       powerSpikeTips: {
         type: "array",
         items: findingSchema,
-        description: "Real item/level power spikes to play around, each citing the specific item/timing data.",
+        description: "Реальные пики силы по предметам/уровням, вокруг которых стоит играть, каждый со ссылкой на конкретный предмет или тайминг.",
       },
       teamfightTips: {
         type: "array",
         items: findingSchema,
-        description: "How to use this hero's kit in teamfights, each citing a specific ability effect.",
+        description: "Как использовать способности героя в тимфайтах, каждый пункт со ссылкой на конкретный эффект способности.",
       },
       matchupTips: {
         type: "array",
         items: findingSchema,
-        description: "What to do against real tough/favorable matchups, each citing the matchup win rate.",
+        description: "Что делать против реально сложных/удобных соперников, каждый пункт с винрейтом матчапа.",
       },
     },
     required: ["identity", "laningTips", "powerSpikeTips", "teamfightTips", "matchupTips"],
@@ -95,22 +180,22 @@ const powerSpikeMomentSchema = {
     trigger: {
       type: "string",
       description:
-        "The real item, level, or timing that creates this power spike, exactly as it appears in the supplied data (e.g. 'Battle Fury completed' or 'Level 6').",
+        "Реальный предмет, уровень или способность, создающие пик силы, - название точно как в данных (например: «Battle Fury» или «Reincarnation, ранг 1»).",
     },
     timing: {
       type: "string",
       description:
-        "The real (or '~' interpolated) in-game time this happened in this match, exactly as supplied (e.g. '14:32' or '~9:40').",
+        "Реальное (или приблизительное, с «~») время в этом матче точно как в данных (например: «14:32» или «~9:40»).",
     },
     why: {
       ...findingSchema,
       description:
-        "Why this specific trigger is a power spike, citing the item/ability's real effect from the supplied data.",
+        "Почему этот триггер - пик силы, со ссылкой на реальный эффект предмета/способности из данных, на русском.",
     },
     whatToDo: {
       ...findingSchema,
       description:
-        "Concrete tactical advice for this exact window - where to go, what objective/camp/rune to take, what fight to look for.",
+        "Конкретный тактический совет на это окно, на русском: куда идти, какую цель/лагерь/руну забрать, какую драку искать.",
     },
   },
   required: ["trigger", "timing", "why", "whatToDo"],
@@ -120,20 +205,20 @@ const powerSpikeMomentSchema = {
 export const powerSpikeTool = {
   name: "submit_power_spike_report",
   description:
-    "Submit 3-5 real power-spike moments for this player's real item purchases and level-ups in this exact match - never an invented item, level, or timing.",
+    "Отправить на русском языке 3-5 реальных пиков силы по реальным покупкам предметов и повышениям уровня игрока в этом матче - никаких выдуманных предметов, уровней или таймингов.",
   input_schema: {
     type: "object" as const,
     properties: {
       summary: {
         type: "string",
-        description: "1-2 sentences on this hero's overall power curve in this match.",
+        description: "1-2 предложения на русском об общей кривой силы героя в этом матче.",
       },
       moments: {
         type: "array",
         items: powerSpikeMomentSchema,
         minItems: 3,
         maxItems: 5,
-        description: "3-5 real power-spike moments, in chronological order.",
+        description: "3-5 реальных пиков силы в хронологическом порядке.",
       },
     },
     required: ["summary", "moments"],

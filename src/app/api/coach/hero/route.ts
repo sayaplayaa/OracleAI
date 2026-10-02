@@ -9,10 +9,10 @@ export async function POST(req: NextRequest) {
   const heroId = Number(body?.heroId);
 
   if (!Number.isInteger(accountId) || accountId <= 0) {
-    return NextResponse.json({ error: "Invalid accountId" }, { status: 400 });
+    return NextResponse.json({ error: "Некорректный accountId" }, { status: 400 });
   }
   if (!Number.isInteger(heroId) || heroId <= 0) {
-    return NextResponse.json({ error: "Invalid heroId" }, { status: 400 });
+    return NextResponse.json({ error: "Некорректный heroId" }, { status: 400 });
   }
 
   try {
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(report);
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "AI coach failed" },
+      { error: err instanceof Error ? err.message : "ИИ-тренер не смог составить отчёт" },
       { status: 502 }
     );
   }

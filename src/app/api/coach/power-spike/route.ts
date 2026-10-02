@@ -11,10 +11,10 @@ export async function POST(req: NextRequest) {
   const accountId = Number(body?.accountId);
 
   if (!Number.isInteger(matchId) || matchId <= 0) {
-    return NextResponse.json({ error: "Invalid matchId" }, { status: 400 });
+    return NextResponse.json({ error: "Некорректный matchId" }, { status: 400 });
   }
   if (!Number.isInteger(accountId) || accountId <= 0) {
-    return NextResponse.json({ error: "Invalid accountId" }, { status: 400 });
+    return NextResponse.json({ error: "Некорректный accountId" }, { status: 400 });
   }
 
   try {
@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
     const player = match.players.find((p) => p.account_id === accountId);
     if (!player) {
       return NextResponse.json(
-        { error: "Player did not play in this match" },
+        { error: "Этот игрок не играл в этом матче" },
         { status: 404 }
       );
     }
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
 
     if (metrics.itemTimeline.length === 0 && skillBuild.length === 0) {
       return NextResponse.json(
-        { error: "This match doesn't have parsed item/level data yet." },
+        { error: "У этого матча пока нет разобранных данных о предметах и уровнях." },
         { status: 404 }
       );
     }
@@ -42,10 +42,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(report);
   } catch (err) {
     if (err instanceof OpenDotaError && err.status === 404) {
-      return NextResponse.json({ error: "Match not found" }, { status: 404 });
+      return NextResponse.json({ error: "Матч не найден" }, { status: 404 });
     }
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "AI coach failed" },
+      { error: err instanceof Error ? err.message : "ИИ-тренер не смог составить отчёт" },
       { status: 502 }
     );
   }

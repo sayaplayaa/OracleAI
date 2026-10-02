@@ -9,7 +9,6 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.125.0",
     "dotaconstants": "^10.8.0",
     "next": "16.3.5",
     "react": "19.2.8",

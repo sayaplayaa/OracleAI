@@ -3,20 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { OpenDotaProMatch } from "@/lib/types";
+import { timeAgoRu } from "@/lib/format";
 
 function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-function timeAgo(unixSeconds: number): string {
-  const diffMs = Date.now() - unixSeconds * 1000;
-  const minutes = Math.floor(diffMs / 60_000);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
 }
 
 export function TournamentResultsList({ matches }: { matches: OpenDotaProMatch[] }) {
@@ -42,7 +34,7 @@ export function TournamentResultsList({ matches }: { matches: OpenDotaProMatch[]
         onChange={(e) => setLeague(e.target.value)}
         className="bg-surface border border-border rounded-md px-3 py-1.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
       >
-        <option value="all">All leagues ({matches.length})</option>
+        <option value="all">Все лиги ({matches.length})</option>
         {leagues.map((name) => (
           <option key={name} value={name}>
             {name}
@@ -64,7 +56,7 @@ export function TournamentResultsList({ matches }: { matches: OpenDotaProMatch[]
                     m.radiant_win ? "text-status-good font-semibold" : "text-ink-secondary"
                   }
                 >
-                  {m.radiant_name ?? "Radiant"}
+                  {m.radiant_name ?? "Силы Света"}
                 </span>
                 <span className="text-ink-muted">vs</span>
                 <span
@@ -72,7 +64,7 @@ export function TournamentResultsList({ matches }: { matches: OpenDotaProMatch[]
                     !m.radiant_win ? "text-status-good font-semibold" : "text-ink-secondary"
                   }
                 >
-                  {m.dire_name ?? "Dire"}
+                  {m.dire_name ?? "Силы Тьмы"}
                 </span>
               </div>
               <p className="text-xs text-ink-muted truncate">{m.league_name}</p>
@@ -82,7 +74,7 @@ export function TournamentResultsList({ matches }: { matches: OpenDotaProMatch[]
                 {m.radiant_score}-{m.dire_score} · {formatDuration(m.duration)}
               </p>
               <p className="text-[11px] text-ink-muted">
-                {mounted ? timeAgo(m.start_time) : " "}
+                {mounted ? timeAgoRu(m.start_time) : " "}
               </p>
             </div>
           </Link>

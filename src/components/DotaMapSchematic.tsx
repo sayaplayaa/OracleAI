@@ -11,9 +11,9 @@ const TYPE_COLORS: Record<MapPoiType, string> = {
 };
 
 const TYPE_LABELS: Record<MapPoiType, string> = {
-  ward: "Vision",
-  farm: "Farm",
-  objective: "Objective",
+  ward: "Обзор",
+  farm: "Фарм",
+  objective: "Цель",
 };
 
 export function DotaMapSchematic({ pois }: { pois: MapPoi[] }) {
@@ -25,7 +25,7 @@ export function DotaMapSchematic({ pois }: { pois: MapPoi[] }) {
       <div className="relative w-full aspect-square rounded-lg overflow-hidden border border-border">
         <Image
           src="/minimap.png"
-          alt="Dota 2 minimap"
+          alt="Миникарта Dota 2"
           fill
           className="object-cover"
           unoptimized

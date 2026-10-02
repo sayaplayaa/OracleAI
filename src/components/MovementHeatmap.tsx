@@ -87,12 +87,12 @@ export function MovementHeatmap({
   return (
     <div className="bg-surface border border-border rounded-lg p-5">
       <h3 className="text-sm font-semibold text-ink-secondary mb-1">
-        Where each player spent their time
+        Где каждый игрок проводил время
       </h3>
       <p className="text-xs text-ink-muted mb-3">
-        Position sample density from OpenDota&apos;s parsed replay - darker
-        means more time spent there, on a shared scale across all 10
-        players.
+        Плотность позиций из разобранного реплея OpenDota: чем темнее, тем
+        больше времени игрок провёл в этой точке. Шкала общая для всех 10
+        игроков.
       </p>
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         {withHeatmap.map((p, i) => (

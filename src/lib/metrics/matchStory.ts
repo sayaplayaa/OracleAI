@@ -1,10 +1,18 @@
 import { getHeroName } from "../constants";
+import { pluralRu } from "../format";
 import type { MatchStory, MatchStoryEvent, OpenDotaMatch, OpenDotaTeamfight } from "../types";
 
 const MULTI_KILL_LABELS: Record<string, string> = {
-  "3": "Triple Kill",
-  "4": "Ultra Kill",
-  "5": "Rampage",
+  "3": "трипл-килл",
+  "4": "ультра-килл",
+  "5": "рампагу",
+};
+
+// Prepositional case for "на топе / на миде / на боте".
+const LANE_LABELS: Record<string, string> = {
+  top: "на топе",
+  mid: "на миде",
+  bot: "на боте",
 };
 
 function teamFromBuildingKey(key: string | undefined): "radiant" | "dire" | null {
@@ -14,21 +22,23 @@ function teamFromBuildingKey(key: string | undefined): "radiant" | "dire" | null
   return null;
 }
 
-function buildingLabel(key: string | undefined, team: "radiant" | "dire" | null): string {
-  const teamLabel = team === "radiant" ? "Radiant" : team === "dire" ? "Dire" : "A";
-  if (!key) return `${teamLabel} building`;
+/** "Разрушена башня T1 Сил Света на миде" - the verb agrees with the building's gender/number. */
+function buildingDestroyedText(key: string | undefined, team: "radiant" | "dire" | null): string {
+  const teamLabel = team === "radiant" ? "Сил Света" : team === "dire" ? "Сил Тьмы" : "";
+  const join = (...parts: string[]) => parts.join(" ").replace(/\s+/g, " ").trim();
+  if (!key) return join("Разрушено здание", teamLabel);
   if (key.includes("tower")) {
     const tier = key.match(/tower(\d)/)?.[1] ?? "?";
     const lane = key.match(/tower\d_(top|mid|bot)/)?.[1] ?? "";
-    return `${teamLabel} tier ${tier} ${lane} tower`.replace(/\s+/g, " ").trim();
+    return join(`Разрушена башня T${tier}`, teamLabel, LANE_LABELS[lane] ?? "");
   }
   if (key.includes("rax")) {
-    const kind = key.includes("melee") ? "melee" : "ranged";
+    const kind = key.includes("melee") ? "ближние" : "дальние";
     const lane = key.match(/(top|mid|bot)/)?.[1] ?? "";
-    return `${teamLabel} ${lane} ${kind} barracks`.replace(/\s+/g, " ").trim();
+    return join(`Разрушены ${kind} бараки`, teamLabel, LANE_LABELS[lane] ?? "");
   }
-  if (key.includes("fort")) return `${teamLabel} Ancient`;
-  return `${teamLabel} building`;
+  if (key.includes("fort")) return join("Разрушен трон", teamLabel);
+  return join("Разрушено здание", teamLabel);
 }
 
 function heroNameForSlot(match: OpenDotaMatch, playerSlot: number | undefined): string | null {
@@ -51,7 +61,7 @@ function objectiveEvents(match: OpenDotaMatch): MatchStoryEvent[] {
         time: obj.time,
         type: "first_blood",
         team: attackerTeam,
-        description: hero ? `First blood: ${hero}` : "First blood",
+        description: hero ? `Первая кровь: ${hero}` : "Первая кровь",
       });
     } else if (obj.type === "building_kill") {
       const defendingTeam = teamFromBuildingKey(obj.key);
@@ -61,7 +71,7 @@ function objectiveEvents(match: OpenDotaMatch): MatchStoryEvent[] {
         time: obj.time,
         type: obj.key?.includes("rax") ? "barracks" : "tower",
         team: destroyerTeam,
-        description: `${buildingLabel(obj.key, defendingTeam)} destroyed`,
+        description: buildingDestroyedText(obj.key, defendingTeam),
       });
     } else if (obj.type?.toUpperCase().includes("ROSHAN")) {
       const team = obj.team === 2 ? "radiant" : obj.team === 3 ? "dire" : attackerTeam;
@@ -69,7 +79,7 @@ function objectiveEvents(match: OpenDotaMatch): MatchStoryEvent[] {
         time: obj.time,
         type: "roshan",
         team,
-        description: "Roshan slain",
+        description: "Roshan убит",
       });
     }
   }
@@ -108,8 +118,8 @@ function biggestTeamfightEvent(match: OpenDotaMatch): MatchStoryEvent | null {
     time: best.start,
     type: "teamfight",
     team: winningTeam,
-    description: `Biggest teamfight: ${best.deaths} deaths (${radiantDeaths} Radiant, ${direDeaths} Dire)`,
-    detail: `Net gold swing of ${netSwing.toLocaleString()} toward ${winningTeam === "radiant" ? "Radiant" : "Dire"}`,
+    description: `Самый крупный тимфайт: ${best.deaths} ${pluralRu(best.deaths, ["смерть", "смерти", "смертей"])} (Силы Света - ${radiantDeaths}, Силы Тьмы - ${direDeaths})`,
+    detail: `Итоговый перевес по золоту: ${netSwing.toLocaleString("ru-RU")} в пользу ${winningTeam === "radiant" ? "Сил Света" : "Сил Тьмы"}`,
   };
 }
 
@@ -146,7 +156,7 @@ function computeSwings(goldAdvTrend: number[]): {
             time: biggestSwing.minute * 60,
             type: "swing",
             team: towardTeam,
-            description: `Biggest 1-minute swing: ${Math.abs(biggestSwing.delta).toLocaleString()} gold toward ${towardTeam === "radiant" ? "Radiant" : "Dire"}`,
+            description: `Самый резкий перелом за минуту: ${Math.abs(biggestSwing.delta).toLocaleString("ru-RU")} золота в пользу ${towardTeam === "radiant" ? "Сил Света" : "Сил Тьмы"}`,
           },
     biggestSwing: { minute: biggestSwing.minute, delta: biggestSwing.delta, towardTeam },
     peakRadiantLead: peakRadiant.value > 0 ? peakRadiant : null,
@@ -164,7 +174,7 @@ function multiKillHighlights(match: OpenDotaMatch): string[] {
       const heroName = getHeroName(player.hero_id);
       const team = player.isRadiant ? "Radiant" : "Dire";
       highlights.push(
-        `${heroName} (${team}) got a ${label}${occurrences > 1 ? ` x${occurrences}` : ""}`
+        `${heroName} (${team}) сделал ${label}${occurrences > 1 ? ` x${occurrences}` : ""}`
       );
     }
   }

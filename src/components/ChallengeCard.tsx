@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { describeChallenge } from "@/lib/challenges";
 import type { ChallengeCandidate, StoredChallenge } from "@/lib/challenges";
+import { pluralRu } from "@/lib/format";
 
 export function ChallengeCandidateCard({
   candidate,
@@ -12,12 +14,12 @@ export function ChallengeCandidateCard({
 }) {
   return (
     <div className="bg-surface border border-border rounded-lg p-4 flex items-center justify-between gap-3">
-      <p className="text-sm text-ink">{candidate.description}</p>
+      <p className="text-sm text-ink">{describeChallenge(candidate)}</p>
       <button
         onClick={onStart}
         className="shrink-0 text-xs font-medium bg-accent hover:brightness-110 text-page px-3 py-1.5 rounded-md transition"
       >
-        Start challenge
+        Начать испытание
       </button>
     </div>
   );
@@ -38,17 +40,17 @@ export function StoredChallengeCard({
   return (
     <div className="bg-surface border border-border rounded-lg p-4">
       <div className="flex items-start justify-between gap-3">
-        <p className="text-sm text-ink">{challenge.description}</p>
+        <p className="text-sm text-ink">{describeChallenge(challenge)}</p>
         <button
           onClick={onDismiss}
           className="text-ink-muted hover:text-ink text-xs shrink-0"
         >
-          Dismiss
+          Убрать
         </button>
       </div>
       {isCompleted ? (
         <p className="text-xs text-status-good mt-2">
-          Completed
+          Выполнено
           {challenge.completedMatchId && (
             <>
               {" - "}
@@ -56,7 +58,7 @@ export function StoredChallengeCard({
                 href={`/player/${accountId}/match/${challenge.completedMatchId}`}
                 className="underline hover:text-ink"
               >
-                view the match
+                открыть матч
               </Link>
             </>
           )}
@@ -64,8 +66,8 @@ export function StoredChallengeCard({
       ) : (
         <p className="text-xs text-ink-muted mt-2">
           {qualifyingGamesSoFar === 0
-            ? "No new games yet since you started this."
-            : `${qualifyingGamesSoFar} new game${qualifyingGamesSoFar === 1 ? "" : "s"} so far - keep going.`}
+            ? "С начала испытания новых игр пока нет."
+            : `С начала испытания: ${qualifyingGamesSoFar} ${pluralRu(qualifyingGamesSoFar, ["новая игра", "новые игры", "новых игр"])} - продолжай.`}
         </p>
       )}
     </div>

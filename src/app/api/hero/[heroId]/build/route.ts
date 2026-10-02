@@ -10,10 +10,10 @@ export async function GET(
   const heroId = Number(heroIdParam);
   const position = req.nextUrl.searchParams.get("position");
   if (!Number.isInteger(heroId) || heroId <= 0) {
-    return NextResponse.json({ error: "Invalid hero id" }, { status: 400 });
+    return NextResponse.json({ error: "Некорректный id героя" }, { status: 400 });
   }
   if (!position || !/^POSITION_[1-5]$/.test(position)) {
-    return NextResponse.json({ error: "Invalid or missing position" }, { status: 400 });
+    return NextResponse.json({ error: "Некорректная или отсутствующая позиция" }, { status: 400 });
   }
 
   try {
@@ -25,7 +25,7 @@ export async function GET(
     return NextResponse.json(computeHeroBuildOverview(heroId, position, totalGames, build));
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to load hero build" },
+      { error: err instanceof Error ? err.message : "Не удалось загрузить сборку героя" },
       { status: 502 }
     );
   }

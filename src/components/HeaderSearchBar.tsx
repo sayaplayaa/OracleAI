@@ -47,12 +47,14 @@ export function HeaderSearchBar({
     try {
       const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Search failed");
+      if (!res.ok) throw new Error(data.error);
       setResults(data);
       setOpen(true);
-      if (data.length === 0) setError("No players found.");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Search failed");
+      if (data.length === 0) setError("Игроки не найдены.");
+    } catch {
+      // The API/network error text is English and technical - show a plain
+      // Russian message instead.
+      setError("Поиск не удался. Попробуй ещё раз через минуту.");
       setOpen(true);
     }
   }
@@ -66,7 +68,8 @@ export function HeaderSearchBar({
             setQuery(e.target.value);
             if (!e.target.value) reset();
           }}
-          placeholder="Search player, match ID..."
+          placeholder="Игрок или ID матча..."
+          aria-label="Поиск игрока или матча"
           className="w-full bg-surface border border-border rounded-md pl-3 pr-3 py-1.5 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-accent"
         />
       </form>

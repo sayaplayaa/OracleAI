@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
   const matchId = Number(body?.matchId);
 
   if (!Number.isInteger(matchId) || matchId <= 0) {
-    return NextResponse.json({ error: "Invalid matchId" }, { status: 400 });
+    return NextResponse.json({ error: "Некорректный matchId" }, { status: 400 });
   }
 
   try {
@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(report);
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "AI coach failed" },
+      { error: err instanceof Error ? err.message : "ИИ-тренер не смог составить отчёт" },
       { status: 502 }
     );
   }

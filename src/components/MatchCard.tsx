@@ -1,21 +1,12 @@
 import Link from "next/link";
 import { HeroIcon } from "./HeroIcon";
+import { timeAgoRu } from "@/lib/format";
 import type { TrendMatchSummary } from "@/lib/types";
 
 function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-function timeAgo(unixSeconds: number): string {
-  const diffMs = Date.now() - unixSeconds * 1000;
-  const days = Math.floor(diffMs / 86_400_000);
-  if (days >= 1) return `${days}d ago`;
-  const hours = Math.floor(diffMs / 3_600_000);
-  if (hours >= 1) return `${hours}h ago`;
-  const mins = Math.floor(diffMs / 60_000);
-  return `${Math.max(mins, 1)}m ago`;
 }
 
 export function MatchCard({
@@ -49,10 +40,13 @@ export function MatchCard({
                 : "var(--color-status-critical)",
             }}
           >
-            {match.win ? "Win" : "Loss"}
+            {match.win ? "Победа" : "Поражение"}
           </span>
         </div>
-        <div className="text-xs text-ink-muted font-mono tabular-nums">
+        <div
+          className="text-xs text-ink-muted font-mono tabular-nums"
+          title="Киллы/смерти/помощи · GPM - золото в минуту · XPM - опыт в минуту"
+        >
           {match.kills}/{match.deaths}/{match.assists}
           {match.gpm !== null && ` · ${match.gpm} GPM`}
           {match.xpm !== null && ` · ${match.xpm} XPM`}
@@ -60,7 +54,7 @@ export function MatchCard({
       </div>
       <div className="text-right text-xs text-ink-muted shrink-0">
         <div>{formatDuration(match.duration)}</div>
-        <div>{timeAgo(match.startTime)}</div>
+        <div>{timeAgoRu(match.startTime)}</div>
       </div>
     </Link>
   );

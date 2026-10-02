@@ -67,7 +67,7 @@ export function findProForHero(
   return {
     pro: {
       accountId: chosen.account_id,
-      name: proInfo.name || "Unknown pro",
+      name: proInfo.name || "Неизвестный про-игрок",
       teamName: proInfo.team_name || null,
     },
     leagueGames,

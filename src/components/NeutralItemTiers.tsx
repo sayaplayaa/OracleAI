@@ -3,14 +3,14 @@ import type { NeutralItemTier } from "@/lib/types";
 
 export function NeutralItemTiers({ tiers }: { tiers: NeutralItemTier[] }) {
   if (tiers.length === 0) {
-    return <p className="text-sm text-ink-muted">Not enough data for this role yet.</p>;
+    return <p className="text-sm text-ink-muted">Для этой роли пока мало данных.</p>;
   }
 
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
       {tiers.map((tier) => (
         <div key={tier.tier} className="bg-surface-raised border border-border rounded-lg p-3">
-          <h4 className="text-xs font-semibold text-ink-secondary mb-2">Tier {tier.tier}</h4>
+          <h4 className="text-xs font-semibold text-ink-secondary mb-2">Тир {tier.tier}</h4>
           <ul className="space-y-1.5">
             {tier.items.map((item, i) => (
               <li

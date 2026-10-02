@@ -20,9 +20,9 @@ export function computeLiveTournamentMatches(
     .filter((m) => m.league_id && m.league_id !== 0)
     .map((m) => ({
       matchId: m.match_id,
-      leagueName: leagueNameById.get(m.league_id) ?? `League ${m.league_id}`,
-      radiantName: m.team_name_radiant || "Radiant",
-      direName: m.team_name_dire || "Dire",
+      leagueName: leagueNameById.get(m.league_id) ?? `Лига ${m.league_id}`,
+      radiantName: m.team_name_radiant || "Силы Света",
+      direName: m.team_name_dire || "Силы Тьмы",
       radiantScore: m.radiant_score,
       direScore: m.dire_score,
       gameTimeSeconds: m.game_time,

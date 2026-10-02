@@ -9,12 +9,26 @@ import { ItemBuildList } from "./ItemBuildList";
 import { ItemTimeline } from "./ItemTimeline";
 import { NeutralItemTiers } from "./NeutralItemTiers";
 import { TalentTable } from "./TalentTable";
+import { attributeNameRu } from "./AttributeBadge";
 import type {
   DraftInsights,
   HeroBuildOverview,
   HeroRoleOverview,
   HeroSummary,
 } from "@/lib/types";
+
+// OpenDota's hero role tags, shown under the selected hero's name.
+const HERO_ROLE_TAGS_RU: Record<string, string> = {
+  Carry: "Керри",
+  Support: "Саппорт",
+  Nuker: "Нюкер",
+  Disabler: "Контроль",
+  Initiator: "Инициатор",
+  Durable: "Живучесть",
+  Escape: "Побег",
+  Pusher: "Пушер",
+  Jungler: "Лесник",
+};
 
 export function DraftExplorer({ heroes }: { heroes: HeroSummary[] }) {
   const searchParams = useSearchParams();
@@ -46,10 +60,10 @@ export function DraftExplorer({ heroes }: { heroes: HeroSummary[] }) {
     try {
       const res = await fetch(`/api/hero/${heroId}/build?position=${position}`);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to load build data");
+      if (!res.ok) throw new Error(data.error ?? "Не удалось загрузить сборку");
       setBuild(data as HeroBuildOverview);
     } catch (err) {
-      setBuildError(err instanceof Error ? err.message : "Failed to load build data");
+      setBuildError(err instanceof Error ? err.message : "Не удалось загрузить сборку");
     } finally {
       setBuildLoading(false);
     }
@@ -73,29 +87,29 @@ export function DraftExplorer({ heroes }: { heroes: HeroSummary[] }) {
     matchupsRes
       .json()
       .then((data) => {
-        if (!matchupsRes.ok) throw new Error(data.error ?? "Failed to load matchups");
+        if (!matchupsRes.ok) throw new Error(data.error ?? "Не удалось загрузить матчапы");
         setInsights(data as DraftInsights);
       })
       .catch((err) =>
-        setInsightsError(err instanceof Error ? err.message : "Failed to load matchups")
+        setInsightsError(err instanceof Error ? err.message : "Не удалось загрузить матчапы")
       );
 
     rolesRes
       .json()
       .then((data) => {
-        if (!rolesRes.ok) throw new Error(data.error ?? "Failed to load role data");
+        if (!rolesRes.ok) throw new Error(data.error ?? "Не удалось загрузить данные по ролям");
         const overview = data as HeroRoleOverview;
         setRoles(overview);
         const defaultRole = [...overview.roles].sort((a, b) => b.games - a.games)[0];
         if (defaultRole) loadBuild(hero.id, defaultRole.position);
       })
       .catch((err) =>
-        setRolesError(err instanceof Error ? err.message : "Failed to load role data")
+        setRolesError(err instanceof Error ? err.message : "Не удалось загрузить данные по ролям")
       );
   }
 
   // Deep-link support: /drafts?hero=74 auto-selects that hero, e.g. from a
-  // Hero Guide page's "Full item build & talents" link.
+  // Hero Guide page's "Полная сборка и таланты" link.
   useEffect(() => {
     const heroIdParam = Number(searchParams.get("hero"));
     if (!Number.isInteger(heroIdParam) || heroIdParam <= 0) return;
@@ -109,7 +123,7 @@ export function DraftExplorer({ heroes }: { heroes: HeroSummary[] }) {
       <input
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder="Filter heroes..."
+        placeholder="Найти героя..."
         className="w-full max-w-sm bg-surface border border-border rounded-md px-4 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-accent"
       />
 
@@ -140,8 +154,8 @@ export function DraftExplorer({ heroes }: { heroes: HeroSummary[] }) {
             <div>
               <h2 className="text-lg font-bold text-ink">{selected.name}</h2>
               <p className="text-xs text-ink-muted">
-                {selected.primaryAttr.toUpperCase()} ·{" "}
-                {selected.roles.join(", ")}
+                {attributeNameRu(selected.primaryAttr)} ·{" "}
+                {selected.roles.map((r) => HERO_ROLE_TAGS_RU[r] ?? r).join(", ")}
               </p>
             </div>
           </div>
@@ -157,7 +171,7 @@ export function DraftExplorer({ heroes }: { heroes: HeroSummary[] }) {
               />
 
               {buildLoading && (
-                <p className="text-sm text-ink-muted">Loading build data...</p>
+                <p className="text-sm text-ink-muted">Загружаю сборку...</p>
               )}
               {buildError && <p className="text-sm text-status-critical">{buildError}</p>}
 
@@ -165,34 +179,40 @@ export function DraftExplorer({ heroes }: { heroes: HeroSummary[] }) {
                 <div className="space-y-4">
                   <div className="grid lg:grid-cols-2 gap-4 items-start">
                     <ItemBuildList
-                      title="Starting items"
-                      description="Most common opening inventory."
+                      title="Стартовые предметы"
+                      description="Самый частый стартовый закуп."
                       items={build.startingItems}
                     />
                     <div className="bg-surface border border-border rounded-lg p-4">
-                      <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-secondary mb-3">
-                        Core item progression
+                      <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-secondary mb-0.5">
+                        Ключевые предметы по порядку
                       </h3>
+                      <p className="text-xs text-ink-muted mb-3">
+                        Предметы, которые на этой неделе купили хотя бы 25% реальных игроков
+                        на этом герое и позиции (STRATZ), в их реальном среднем порядке и
+                        тайминге. Это не полная сборка: дальше игры расходятся в зависимости от
+                        матчапа - частые поздние покупки смотри в ситуативных предметах ниже.
+                      </p>
                       <ItemTimeline items={build.coreProgression} />
                     </div>
                   </div>
 
                   <ItemBuildList
-                    title="Situational items"
-                    description="Picked less often, by average purchase rate."
+                    title="Ситуативные предметы"
+                    description="Берут реже, чем в 25% игр - реальные покупки под лейтгейм и конкретный матчап (STRATZ), сначала самые частые."
                     items={build.situationalItems}
                   />
 
                   <div>
                     <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-secondary mb-3">
-                      Neutral items by tier
+                      Нейтральные предметы по тирам
                     </h3>
                     <NeutralItemTiers tiers={build.neutralTiers} />
                   </div>
 
                   <div>
                     <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-secondary mb-3">
-                      Talents
+                      Таланты
                     </h3>
                     <TalentTable levels={build.talents} />
                   </div>
@@ -202,40 +222,40 @@ export function DraftExplorer({ heroes }: { heroes: HeroSummary[] }) {
           )}
 
           <div className="pt-2 border-t border-border">
-            <h3 className="text-sm font-semibold text-ink mb-3">Matchups</h3>
+            <h3 className="text-sm font-semibold text-ink mb-3">Матчапы</h3>
             {insightsError && <p className="text-sm text-status-critical">{insightsError}</p>}
             {insights && (
               <div className="space-y-4">
                 <div className="grid sm:grid-cols-2 gap-4">
                   <MatchupList
-                    title={`${selected.name} struggles against`}
+                    title={`Против кого ${selected.name} слаб`}
                     matchups={insights.toughestMatchups}
-                    emptyMessage="Not enough recorded games against any single hero."
+                    emptyMessage="Пока ни против одного героя не набралось достаточно игр."
                   />
                   <MatchupList
-                    title={`${selected.name} dominates`}
+                    title={`Против кого ${selected.name} силён`}
                     matchups={insights.bestMatchups}
-                    emptyMessage="Not enough recorded games against any single hero."
+                    emptyMessage="Пока ни против одного героя не набралось достаточно игр."
                   />
                 </div>
                 <div>
                   <MatchupList
                     title={
                       insights.lanePosition
-                        ? `Best lane partners (${insights.lanePosition}, this week)`
-                        : "Best lane partners"
+                        ? `Лучшие напарники по линии (${insights.lanePosition}, эта неделя)`
+                        : "Лучшие напарники по линии"
                     }
                     matchups={insights.bestLanePartners}
                     emptyMessage={
                       insights.lanePosition
-                        ? "Not enough games this week for any single pairing."
-                        : "No lane-synergy data available (requires a STRATZ_API_KEY)."
+                        ? "На этой неделе ни с одним напарником не набралось достаточно игр."
+                        : "Нет данных о синергии на линии (нужен ключ STRATZ_API_KEY)."
                     }
                   />
                   {insights.lanePosition && (
                     <p className="text-xs text-ink-muted mt-2">
-                      From STRATZ, current week only - reflects the live meta
-                      rather than an all-time average.
+                      Данные STRATZ только за текущую неделю - это живая мета, а не
+                      среднее за всё время.
                     </p>
                   )}
                 </div>

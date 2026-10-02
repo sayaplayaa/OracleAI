@@ -66,6 +66,12 @@ export interface WardLogEntry {
   time: number;
   x: number;
   y: number;
+  // Entity handle - pairs a placement with its obs_left_log/sen_left_log
+  // entry (the moment the ward expired or was destroyed).
+  ehandle?: number;
+  player_slot?: number;
+  // Left logs only: who destroyed the ward (absent when it simply expired).
+  attackername?: string;
 }
 
 export interface OpenDotaMatchPlayer {
@@ -109,6 +115,22 @@ export interface OpenDotaMatchPlayer {
   gold_t?: number[];
   xp_t?: number[];
   lh_t?: number[];
+  dn_t?: number[];
+  // True net worth (items + gold) at each minute mark; gold_t is cumulative
+  // gold earned, which is a different number.
+  networth_t?: number[];
+  // OpenDota's own 1-5 position estimate for this player.
+  position_est?: number;
+  deaths_log?: { time: number; key: string; gold_lost?: number; time_dead?: number }[];
+  buyback_log?: { time: number }[];
+  // Seconds by life state: "0" alive, "2" dead (1 is the brief dying state).
+  life_state?: Record<string, number>;
+  teamfight_participation?: number;
+  towers_killed?: number;
+  roshans_killed?: number;
+  camps_stacked?: number;
+  observer_kills?: number;
+  sentry_kills?: number;
   purchase_log?: { time: number; key: string }[];
   // Flat, ordered list of ability ids leveled up (talent levels 10/15/20/25
   // are excluded, not just unlabeled) - no per-entry timestamp from OpenDota.
@@ -117,7 +139,10 @@ export interface OpenDotaMatchPlayer {
   runes_log?: { time: number; key: string }[];
   obs_log?: WardLogEntry[];
   sen_log?: WardLogEntry[];
-  // lane_pos[y][x] = number of position samples observed at that grid cell.
+  obs_left_log?: WardLogEntry[];
+  sen_left_log?: WardLogEntry[];
+  // lane_pos[x][y] = number of position samples observed at that grid cell
+  // (outer key is x, inner is y - verified against known lanes).
   lane_pos?: Record<string, Record<string, number>>;
   benchmarks?: Record<
     string,
@@ -137,6 +162,8 @@ export interface OpenDotaObjective {
 }
 
 export interface OpenDotaTeamfightPlayer {
+  // Where this player died in this fight: deaths_pos[x][y] = count.
+  deaths_pos?: Record<string, Record<string, number>>;
   deaths: number;
   buybacks: number;
   damage: number;
@@ -274,6 +301,23 @@ export interface MetricPoint {
   benchmarkMedian?: number;
 }
 
+export interface MatchDeathEvent {
+  time: number;
+  killerHeroId: number;
+  killerHeroName: string;
+}
+
+// One real teamfight (from OpenDota's parsed teamfights) this player was
+// actually involved in (nonzero kills/deaths/damage) - not every fight in
+// the match, just this player's participation in it.
+export interface MatchTeamfightMoment {
+  time: number;
+  kills: number;
+  deaths: number;
+  heroDamage: number;
+  goldDelta: number;
+}
+
 export interface MatchMetrics {
   matchId: number;
   accountId: number;
@@ -289,10 +333,34 @@ export interface MatchMetrics {
   lastHitsAt10: number | null;
   goldAt10: number | null;
   xpAt10: number | null;
+  // OpenDota's real (gold_t/xp_t-derived) lane-phase efficiency vs an ideal
+  // solo-lane baseline, as a 0-100 percentage - null when unparsed/unavailable.
+  laneEfficiency: number | null;
   stats: MetricPoint[];
   itemTimeline: { time: number; itemName: string; itemKey: string }[];
+  // Real pre-horn (and just-after) shop purchases - unlike itemTimeline,
+  // includes consumables/wards/components, since that's what a starting
+  // build actually is.
+  startingItems: { time: number; itemName: string; itemKey: string }[];
+  // Real death events, derived from the killing player's own kills_log (an
+  // entry there naming this hero) - the killer's identity comes from that
+  // same player record, so it's real, never inferred/invented. Empty when
+  // the match isn't parsed.
+  deathLog: MatchDeathEvent[];
+  teamfights: MatchTeamfightMoment[];
   wardsPlaced: number;
   buybacks: number;
+  // The real hero(es) on the opposing team who shared this player's real
+  // physical lane (OpenDota's `lane` field, not the team-relative lane_role -
+  // matching on the latter would pair a team's safe lane with the enemy's
+  // safe lane, which are on opposite sides of the map and never actually
+  // fight each other). Empty when lane data isn't available (unparsed match).
+  laneOpponents: {
+    heroName: string;
+    goldAt10: number | null;
+    xpAt10: number | null;
+    lastHitsAt10: number | null;
+  }[];
 }
 
 export interface TrendMatchSummary {
@@ -309,6 +377,26 @@ export interface TrendMatchSummary {
   // genuinely unavailable for this match, never a fabricated 0.
   gpm: number | null;
   xpm: number | null;
+}
+
+// A count of how many sampled games this player was ahead/behind/tied
+// against their real lane opponent on one stat - a recurring pattern, not
+// one game's result.
+export interface LaneTally {
+  ahead: number;
+  behind: number;
+  tied: number;
+  sampledGames: number;
+}
+
+// Real recurring patterns mined from a bounded sample of this player's own
+// recent full matches (deaths, lane comparisons) - see trendPatterns.ts.
+// Games OpenDota hasn't parsed contribute nothing (never guessed).
+export interface CrossMatchPatterns {
+  parsedGamesSampled: number;
+  recurringKillers: { killerHeroName: string; count: number }[];
+  laneLastHits: LaneTally;
+  laneGold: LaneTally;
 }
 
 export interface TrendMetrics {
@@ -371,8 +459,170 @@ export interface CoachFinding {
   metric: string; // the specific metric/value that grounds this claim
 }
 
+// A real chronological moment (a death, a teamfight, an item timing) from a
+// single match's timeline - the "watched the replay" part of the report.
+// Only the single-match coach report populates this; other report types
+// (trends, hero guide, pro comparison) leave it undefined.
+export interface MatchKeyMoment {
+  time: string; // real in-game time from this match, e.g. "14:32"
+  whatHappened: string;
+  whatToDoDifferently: string;
+}
+
+// A real ward placement (x/y already converted to 0-100 map percent, time in
+// match seconds) from this match's obs_log/sen_log - the only real positional
+// data OpenDota's public API exposes. Never a hero's position - that data
+// doesn't exist in this API.
+export interface WardPoint {
+  x: number;
+  y: number;
+  time: number;
+  team: "radiant" | "dire";
+  kind: "observer" | "sentry";
+  // Hero of the player who placed it.
+  placedBy?: string | null;
+  // Observer vision radius in map percent (for drawing the vision circle).
+  radius?: number;
+  // True when this ward's vision covered the death spot.
+  coversDeath?: boolean;
+  // Placed by the analysed player's own team.
+  own?: boolean;
+}
+
+export type DeathKillerKind = "hero" | "creeps" | "neutrals" | "tower" | "roshan" | "other";
+
+export interface DeathTag {
+  text: string;
+  tone: "bad" | "warn" | "info";
+}
+
+// Real map context for one real death, computed server-side from the replay
+// data (STRATZ death events + OpenDota ward/death logs), never by the AI model:
+// where it happened, what killed the player, which enemy ward saw them, and
+// both teams' wards that were actually standing at that moment.
+export interface DeathVisionMoment {
+  time: number;
+  timeLabel: string;
+  // Exact death spot in map percent (0-100); null when no source has it.
+  position: { x: number; y: number } | null;
+  // Map area, e.g. "вражеский оффлейн (топ)".
+  place: string | null;
+  side: "own" | "enemy" | "river" | null;
+  deepInEnemyTerritory: boolean;
+  killer: { kind: DeathKillerKind; heroId: number | null; name: string };
+  // In-game (English) name of the killing ability or item, e.g. "Arcane Orb".
+  killingBlow: string | null;
+  // Every enemy hero credited with the kill or an assist.
+  enemiesInvolved: { heroId: number; name: string }[];
+  inTeamfight: boolean;
+  // Last hits gained right before the death, when the player was farming.
+  farmingLastHits: number | null;
+  // The enemy Observer Ward whose vision covered the death spot, if any.
+  enemyWard: WardPoint | null;
+  // Whether the player's own team had an Observer Ward covering the spot
+  // (null when the position is unknown).
+  ownVision: boolean | null;
+  tags: DeathTag[];
+  // One deterministic sentence: what killed the player and why.
+  reason: string;
+  timeDead: number | null;
+  goldLost: number | null;
+  // Both teams' wards standing at the moment of death.
+  wards: WardPoint[];
+}
+
+// ---- Role-aware single-match analysis (worked out in code, narrated by the AI) ----
+
+export type PhaseId = "laning" | "midGame" | "lateGame";
+export type PhaseVerdict = "won" | "even" | "lost";
+export type PositionSource = "stratz" | "opendota" | "lane-estimate";
+
+// Net worth at one minute mark vs the player on the SAME position of the
+// opposing team (pos 1 vs pos 1, pos 5 vs pos 5, ...), never a lane-mate.
+export interface NetWorthCheckpoint {
+  minute: number;
+  you: number;
+  counterpart: number;
+  diff: number;
+}
+
+export interface PhaseAnalysis {
+  id: PhaseId;
+  label: string;
+  window: string;
+  // Won/even/lost vs the same-position counterpart, decided in code.
+  verdict: PhaseVerdict | null;
+  verdictBasis: string;
+  // Real, already-verified facts about this phase.
+  facts: string[];
+  // Verified catalyst candidates for how the phase went, most damaging first.
+  causes: string[];
+  // What a strong coach teaches for those causes, for this role.
+  principles: string[];
+}
+
+export interface MatchAnalysis {
+  matchId: number;
+  heroId: number;
+  heroName: string;
+  win: boolean;
+  durationSeconds: number;
+  position: number;
+  positionLabel: string;
+  positionSource: PositionSource;
+  counterpart: { heroId: number; heroName: string } | null;
+  laneSummary: string;
+  netWorth: NetWorthCheckpoint[];
+  phases: PhaseAnalysis[];
+  // End-of-game comparison lines vs the counterpart, only stats that matter for this role.
+  endStateVsCounterpart: string[];
+  // End-of-game stats relevant to this role only (with hero-benchmark percentiles).
+  stats: MetricPoint[];
+  // Every time label (m:ss) the analysis produced - used to reject invented timestamps.
+  knownTimes: string[];
+  // Heroes that killed this player 2+ times over the whole game.
+  repeatKillers: { heroId: number; heroName: string; count: number }[];
+  // Display names of every item bought, held or benchmarked - the only items the coach may name.
+  knownItems: string[];
+  // Real strengths found in the data (empty when there are none).
+  strengths: CoachFinding[];
+  // The top verified problems across all phases, each with what a coach teaches for it.
+  priorities: CoachFinding[];
+  buybacksUsed: number;
+}
+
+export interface CoachPhaseReport {
+  id: PhaseId;
+  label: string;
+  window: string;
+  verdict: PhaseVerdict | null;
+  // Facts from the analysis (code), shown as evidence under the AI's write-up.
+  evidence: string[];
+  // Verified catalyst candidates worked out in code, most damaging first.
+  catalysts: string[];
+  whatWentWrong: string;
+  // The decision/habit that caused it.
+  decision: string;
+  doInstead: string;
+}
+
+export interface CoachComparison {
+  counterpartHero: string;
+  positionLabel: string;
+  positionSource: PositionSource;
+  netWorth: NetWorthCheckpoint[];
+}
+
 export interface CoachReport {
   summary: string;
+  // Phase-by-phase breakdown (single-match report only).
+  phases?: CoachPhaseReport[];
+  // Net worth vs the same-position enemy player (single-match report only).
+  comparison?: CoachComparison;
+  keyMoments?: MatchKeyMoment[];
+  // Only the single-match coach report populates this - computed
+  // deterministically from real match data, not part of the AI's own output.
+  deathVision?: DeathVisionMoment[];
   strengths: CoachFinding[];
   weaknesses: CoachFinding[];
   tips: CoachFinding[];
@@ -383,9 +633,16 @@ export interface CoachReport {
 export interface HeroAbility {
   key: string;
   name: string;
+  // Official Russian client text when available, else the English original.
   description: string;
+  // Always the English original - keyword checks (does this kit stun/heal?)
+  // are written against it.
+  descriptionEn: string;
   isInnate: boolean;
-  attributes: { header: string; value: string }[];
+  // `localized`: the label is Russian (official client text or a standard
+  // term). Internal values the game client never shows keep an English label
+  // and are only passed to the AI, not displayed.
+  attributes: { header: string; value: string; localized: boolean }[];
   iconUrl: string;
 }
 
@@ -404,6 +661,10 @@ export interface SkillBuildEntry {
   abilityKey: string;
   abilityName: string;
   iconUrl: string;
+  // Which point this is in that specific ability (1st, 2nd, ...) - lets the
+  // coach cite the real numeric value for the rank actually reached, instead
+  // of guessing which entry in the ability's value array applies.
+  rank: number;
   // Interpolated from this player's real xp_t series against dotaconstants'
   // official xp_level thresholds - a real-data estimate, not a logged
   // timestamp (OpenDota doesn't record exactly when a level-up happened).
@@ -467,6 +728,14 @@ export interface FullMatchPlayer {
   senPlaced: number;
   itemKeys: string[];
   farmTrend: FarmPoint[];
+  // Per-minute values (index = minute) for the post-game style graphs;
+  // empty arrays when the replay isn't parsed.
+  series: {
+    netWorth: number[];
+    xp: number[];
+    lastHits: number[];
+    denies: number[];
+  };
   observerWards: WardPlacement[];
   sentryWards: WardPlacement[];
   positionHeatmap: HeatmapCell[] | null;

@@ -9,7 +9,7 @@ export async function GET(
   const { heroId: heroIdParam } = await params;
   const heroId = Number(heroIdParam);
   if (!Number.isInteger(heroId) || heroId <= 0) {
-    return NextResponse.json({ error: "Invalid hero id" }, { status: 400 });
+    return NextResponse.json({ error: "Некорректный id героя" }, { status: 400 });
   }
 
   try {
@@ -17,7 +17,7 @@ export async function GET(
     return NextResponse.json(computeHeroRoleOverview(heroId, stats));
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to load role stats" },
+      { error: err instanceof Error ? err.message : "Не удалось загрузить статистику по ролям" },
       { status: 502 }
     );
   }

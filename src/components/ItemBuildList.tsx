@@ -5,7 +5,7 @@ export function ItemBuildList({
   title,
   description,
   items,
-  emptyMessage = "Not enough data for this role yet.",
+  emptyMessage = "Для этой роли пока мало данных.",
 }: {
   title: string;
   description?: string;
@@ -27,7 +27,7 @@ export function ItemBuildList({
               <ItemIcon itemKey={item.itemKey} size={32} />
               <span className="text-sm text-ink flex-1 truncate">{item.itemName}</span>
               <span className="text-xs font-mono text-ink-muted">
-                {item.matchCount.toLocaleString()}
+                {item.matchCount.toLocaleString("ru-RU")}
               </span>
               <span
                 className="text-xs font-mono font-semibold w-14 text-right"

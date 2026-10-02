@@ -1,5 +1,4 @@
 import {
-  getAbilityDisplayName,
   getAbilityNameById,
   getHeroName,
   getHeroTalents,
@@ -7,7 +6,7 @@ import {
   getItemNameByKey,
   getItemTier,
 } from "../constants";
-import { formatStratzPosition } from "../stratz";
+import { getTalentLabel } from "../talents";
 import { wilsonScoreLowerBound } from "./statistics";
 import type {
   StratzHeroBuild,
@@ -28,15 +27,19 @@ import type {
 } from "../types";
 
 const ROLE_LABELS: Record<string, string> = {
-  POSITION_1: "Carry",
-  POSITION_2: "Mid",
-  POSITION_3: "Offlane",
-  POSITION_4: "Support",
-  POSITION_5: "Hard Support",
+  POSITION_1: "Керри",
+  POSITION_2: "Мид",
+  POSITION_3: "Оффлейн",
+  POSITION_4: "Поддержка",
+  POSITION_5: "Хард-саппорт",
 };
 
 export function roleLabelForPosition(position: string): string {
-  return ROLE_LABELS[position] ?? formatStratzPosition(position);
+  const label = ROLE_LABELS[position];
+  if (label) return label;
+  if (!position) return "Неизвестно";
+  const match = position.match(/POSITION_(\d)/);
+  return match ? `Позиция ${match[1]}` : position;
 }
 
 const MIN_GAMES_FOR_ROLE = 5;
@@ -61,43 +64,47 @@ export function computeHeroRoleOverview(
   return { heroId, heroName: getHeroName(heroId), roles };
 }
 
-const MIN_GAMES_FOR_META = 15;
+// STRATZ's stats query is already restricted to Legend+ brackets (see
+// META_BRACKETS in stratz.ts), but "position" itself is STRATZ's own
+// per-match classifier inferred from farm priority, not a ground-truth
+// drafted role - a hero who happens to out-farm a bad teammate can get
+// mislabeled into a position they were never actually played for. Verified
+// empirically: real, deliberately-played meta picks cluster at 16,000+ games
+// a week even in this one bracket, while classifier noise (e.g. Leshrac
+// showing up as "Position 1") tops out in the hundreds - a 1,000-game floor
+// sits cleanly in that gap without cutting real smaller-but-legitimate picks.
+const MIN_GAMES_FOR_META = 1000;
+const HEROES_PER_POSITION = 8;
+const META_POSITIONS = ["POSITION_1", "POSITION_2", "POSITION_3", "POSITION_4", "POSITION_5"];
 
+/** Top real, current-meta heroes per position (Legend+ bracket, this week), for the Meta tier table. */
 export function computeMetaTierList(
-  allStats: StratzHeroPositionStat[],
-  roleFilter: string
-): MetaTierEntry[] {
+  allStats: StratzHeroPositionStat[]
+): Record<string, MetaTierEntry[]> {
   const eligible = allStats.filter(
     (s) => s.position && s.matchCount >= MIN_GAMES_FOR_META
   );
 
-  let rows: StratzHeroPositionStat[];
-  if (roleFilter === "all") {
-    // One row per hero: whichever position STRATZ has the most games for.
-    const byHero = new Map<number, StratzHeroPositionStat>();
-    for (const s of eligible) {
-      const existing = byHero.get(s.heroId);
-      if (!existing || s.matchCount > existing.matchCount) byHero.set(s.heroId, s);
-    }
-    rows = [...byHero.values()];
-  } else {
-    rows = eligible.filter((s) => s.position === roleFilter);
+  const result: Record<string, MetaTierEntry[]> = {};
+  for (const position of META_POSITIONS) {
+    result[position] = eligible
+      .filter((s) => s.position === position)
+      .map((s) => ({
+        heroId: s.heroId,
+        heroName: getHeroName(s.heroId),
+        position: s.position,
+        roleLabel: roleLabelForPosition(s.position),
+        games: s.matchCount,
+        winRate: s.matchCount > 0 ? s.winCount / s.matchCount : 0,
+        // Sort key only, not returned - ranks by confidence-adjusted win rate
+        // so a handful of lucky games can't outrank a large reliable sample.
+        _rankScore: wilsonScoreLowerBound(s.winCount, s.matchCount),
+      }))
+      .sort((a, b) => b._rankScore - a._rankScore)
+      .slice(0, HEROES_PER_POSITION)
+      .map(({ _rankScore, ...entry }) => entry);
   }
-
-  return rows
-    .map((s) => ({
-      heroId: s.heroId,
-      heroName: getHeroName(s.heroId),
-      position: s.position,
-      roleLabel: roleLabelForPosition(s.position),
-      games: s.matchCount,
-      winRate: s.matchCount > 0 ? s.winCount / s.matchCount : 0,
-      // Sort key only, not returned - ranks by confidence-adjusted win rate
-      // so a handful of lucky games can't outrank a large reliable sample.
-      _rankScore: wilsonScoreLowerBound(s.winCount, s.matchCount),
-    }))
-    .sort((a, b) => b._rankScore - a._rankScore)
-    .map(({ _rankScore, ...entry }) => entry);
+  return result;
 }
 
 function toItemStat(row: StratzItemStat | StratzNeutralItemStat): ItemStat | null {
@@ -151,7 +158,8 @@ function computeItemProgression(
     if (!stat) continue;
     const pickRate = row.matchCount / totalGames;
     if (pickRate >= CORE_ITEM_PICK_RATE && row.time !== undefined) {
-      core.push({ ...stat, avgTimeSeconds: row.time });
+      // STRATZ reports the purchase time in whole minutes (the most common minute for this item).
+      core.push({ ...stat, avgTimeSeconds: row.time * 60 });
     } else {
       situational.push(stat);
     }
@@ -159,7 +167,7 @@ function computeItemProgression(
 
   return {
     coreProgression: core.sort((a, b) => a.avgTimeSeconds - b.avgTimeSeconds).slice(0, 14),
-    situationalItems: situational.sort((a, b) => b.matchCount - a.matchCount).slice(0, 8),
+    situationalItems: situational.sort((a, b) => b.matchCount - a.matchCount).slice(0, 14),
   };
 }
 
@@ -198,7 +206,7 @@ function computeTalents(heroId: number, talentStats: StratzTalentStat[]): Talent
         const stat = statsByName.get(t.name);
         const matchCount = stat?.matchCount ?? 0;
         return {
-          label: getAbilityDisplayName(t.name),
+          label: getTalentLabel(t.name),
           matchCount,
           winRate: stat && matchCount > 0 ? stat.winCount / matchCount : 0,
           isTopChoice: false,

@@ -5,7 +5,7 @@ export function HeroAbilityList({ abilities }: { abilities: HeroAbility[] }) {
   if (abilities.length === 0) {
     return (
       <div className="bg-surface border border-border rounded-lg p-4">
-        <p className="text-sm text-ink-muted">No ability data available for this hero.</p>
+        <p className="text-sm text-ink-muted">Для этого героя нет данных о способностях.</p>
       </div>
     );
   }
@@ -34,16 +34,16 @@ export function HeroAbilityList({ abilities }: { abilities: HeroAbility[] }) {
               <h3 className="text-sm font-semibold text-ink">{ability.name}</h3>
               {ability.isInnate && (
                 <span className="text-[10px] uppercase tracking-wide text-accent bg-accent/10 px-1.5 py-0.5 rounded">
-                  Innate
+                  Врождённая
                 </span>
               )}
             </div>
             {ability.description && (
               <p className="text-sm text-ink-secondary mt-1">{ability.description}</p>
             )}
-            {ability.attributes.length > 0 && (
+            {ability.attributes.some((a) => a.localized) && (
               <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-                {ability.attributes.map((attr) => (
+                {ability.attributes.filter((a) => a.localized).map((attr) => (
                   <div key={attr.header} className="flex items-baseline gap-1.5">
                     <dt className="text-[10px] uppercase tracking-wide text-ink-muted">
                       {attr.header}

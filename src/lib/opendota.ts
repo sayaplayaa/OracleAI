@@ -1,4 +1,4 @@
-import { cached } from "./cache";
+import { cached, invalidate } from "./cache";
 import type {
   OpenDotaProfile,
   OpenDotaWinLoss,
@@ -25,6 +25,25 @@ export class OpenDotaError extends Error {
   }
 }
 
+// Cloudflare-fronted gateway/timeout codes - OpenDota's origin blipping, not
+// a real client error, so retrying (unlike a 404/400) is worth it. Distinct
+// from the 429 handling below since these aren't a rate limit.
+const TRANSIENT_STATUS = new Set([502, 503, 504, 522, 524]);
+const MAX_TRANSIENT_ATTEMPTS = 3;
+
+// A stalled connection (e.g. an ISP cutting Cloudflare flows after ~25 KB) never
+// errors on its own; without a deadline fetch hangs for Node's 5-minute default.
+const REQUEST_TIMEOUT_MS = 15_000;
+
+function stalledError(path: string, err: unknown): OpenDotaError {
+  const timedOut = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+  return new OpenDotaError(
+    timedOut
+      ? `OpenDota не отвечает дольше ${REQUEST_TIMEOUT_MS / 1000} с: ${path} (соединение зависло - возможно, провайдер режет сервисы за Cloudflare; помогает VPN)`
+      : `Не удался запрос к OpenDota: ${path} (${err instanceof Error ? err.message : "ошибка сети"})`
+  );
+}
+
 async function request<T>(
   path: string,
   init?: RequestInit,
@@ -34,24 +53,41 @@ async function request<T>(
   const url = new URL(BASE_URL + path);
   if (key) url.searchParams.set("api_key", key);
 
-  const res = await fetch(url.toString(), {
-    ...init,
-    headers: { Accept: "application/json", ...init?.headers },
-  });
+  const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(url.toString(), {
+      ...init,
+      headers: { Accept: "application/json", ...init?.headers },
+      signal,
+    });
+  } catch (err) {
+    throw stalledError(path, err);
+  }
 
   if (res.status === 429 && attempt < 3) {
     await new Promise((r) => setTimeout(r, 500 * attempt));
     return request<T>(path, init, attempt + 1);
   }
 
+  if (TRANSIENT_STATUS.has(res.status) && attempt < MAX_TRANSIENT_ATTEMPTS) {
+    await new Promise((r) => setTimeout(r, 750 * attempt));
+    return request<T>(path, init, attempt + 1);
+  }
+
   if (!res.ok) {
     throw new OpenDotaError(
-      `OpenDota request failed: ${path} (${res.status})`,
+      `Не удался запрос к OpenDota: ${path} (${res.status})`,
       res.status
     );
   }
 
-  const text = await res.text();
+  let text: string;
+  try {
+    text = await res.text();
+  } catch (err) {
+    throw stalledError(path, err);
+  }
   return (text ? JSON.parse(text) : null) as T;
 }
 
@@ -96,6 +132,58 @@ export function getMatch(matchId: number) {
   return cached(`match:${matchId}`, 60 * MINUTE, () =>
     request<OpenDotaMatch>(`/matches/${matchId}`)
   );
+}
+
+// Same real field the Full Match tab already uses to decide whether to show
+// the "Request full parse" button - present only once OpenDota has actually
+// parsed the replay.
+export function isMatchParsed(match: OpenDotaMatch): boolean {
+  return Array.isArray(match.radiant_gold_adv);
+}
+
+/**
+ * If a match hasn't been parsed yet, request a parse and poll until it
+ * finishes (or we give up), then return a fresh (cache-bypassed) copy -
+ * real death/teamfight/item data instead of the AI coach having nothing to
+ * work with. Best-effort: on timeout or a parse failure, returns whatever we
+ * have (still unparsed) rather than throwing, so the caller can fall back to
+ * the honest "no timeline data" report instead of erroring out.
+ */
+export async function ensureMatchParsed(
+  matchId: number,
+  match: OpenDotaMatch
+): Promise<OpenDotaMatch> {
+  if (isMatchParsed(match)) return match;
+
+  let jobId: number | undefined;
+  try {
+    const job = await requestMatchParse(matchId);
+    jobId = job?.job?.jobId;
+  } catch {
+    return match;
+  }
+  if (!jobId) return match;
+
+  const POLL_INTERVAL_MS = 4000;
+  const MAX_ATTEMPTS = 20; // ~80s, matching the manual "Request full parse" button's budget
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    let done: boolean;
+    try {
+      done = (await getParseJobStatus(jobId)) === null;
+    } catch {
+      return match;
+    }
+    if (done) {
+      invalidate(`match:${matchId}`);
+      try {
+        return await getMatch(matchId);
+      } catch {
+        return match;
+      }
+    }
+  }
+  return match;
 }
 
 export function getBenchmarks(heroId: number) {

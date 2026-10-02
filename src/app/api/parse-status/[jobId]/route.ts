@@ -8,7 +8,7 @@ export async function GET(
   const { jobId: jobIdParam } = await params;
   const jobId = Number(jobIdParam);
   if (!Number.isInteger(jobId) || jobId <= 0) {
-    return NextResponse.json({ error: "Invalid job id" }, { status: 400 });
+    return NextResponse.json({ error: "Некорректный id задачи" }, { status: 400 });
   }
 
   try {
@@ -18,7 +18,7 @@ export async function GET(
     return NextResponse.json({ done: status === null, status });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to check parse status" },
+      { error: err instanceof Error ? err.message : "Не удалось проверить статус разбора" },
       { status: 502 }
     );
   }

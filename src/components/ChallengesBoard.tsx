@@ -7,6 +7,7 @@ import type { ChallengeCandidate, StoredChallenge } from "@/lib/challenges";
 import { loadChallenges, saveChallenges } from "@/lib/challengeStorage";
 import { ChallengeCandidateCard, StoredChallengeCard } from "./ChallengeCard";
 import type { TrendMatchSummary } from "@/lib/types";
+import { pluralRu } from "@/lib/format";
 
 interface Session {
   accountId: number;
@@ -62,7 +63,7 @@ export function ChallengesBoard() {
         saveChallenges(accountId, reevaluated);
       })
       .catch((err) =>
-        setError(err instanceof Error ? err.message : "Failed to load your matches")
+        setError(err instanceof Error ? err.message : "Не удалось загрузить твои матчи")
       )
       .finally(() => setLoading(false));
   }, [accountId]);
@@ -88,21 +89,21 @@ export function ChallengesBoard() {
   }
 
   if (session === undefined) {
-    return <p className="text-sm text-ink-muted">Loading...</p>;
+    return <p className="text-sm text-ink-muted">Загрузка...</p>;
   }
 
   if (!accountId) {
     return (
       <div className="bg-surface border border-border rounded-lg p-5 max-w-md space-y-3">
         <p className="text-sm text-ink-secondary">
-          Sign in through Steam, or enter your profile, to get training
-          challenges grounded in your own recent games.
+          Войди через Steam или укажи свой профиль, чтобы получить
+          тренировочные испытания по твоим последним играм.
         </p>
         <div className="flex gap-2">
           <input
             value={manualInput}
             onChange={(e) => setManualInput(e.target.value)}
-            placeholder="Steam64 ID or profile URL"
+            placeholder="Steam64 ID или ссылка на профиль"
             className="flex-1 bg-page border border-border rounded-md px-3 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-accent"
           />
           <button
@@ -112,12 +113,12 @@ export function ChallengesBoard() {
                 setError(null);
                 setManualAccountId(id);
               } else {
-                setError("Couldn't parse that Steam ID/URL.");
+                setError("Не получилось распознать Steam ID или ссылку.");
               }
             }}
             className="bg-accent hover:brightness-110 text-page text-sm font-medium px-4 py-2 rounded-md transition"
           >
-            Go
+            Найти
           </button>
         </div>
         {error && <p className="text-sm text-status-critical">{error}</p>}
@@ -126,7 +127,7 @@ export function ChallengesBoard() {
   }
 
   if (loading && !matches) {
-    return <p className="text-sm text-ink-muted">Loading your recent games...</p>;
+    return <p className="text-sm text-ink-muted">Загружаю твои последние игры...</p>;
   }
   if (error) {
     return <p className="text-sm text-status-critical">{error}</p>;
@@ -142,7 +143,7 @@ export function ChallengesBoard() {
     <div className="space-y-8">
       {challenges.length > 0 && (
         <div>
-          <h2 className="text-sm font-semibold text-ink mb-3">Your challenges</h2>
+          <h2 className="text-sm font-semibold text-ink mb-3">Твои испытания</h2>
           <div className="space-y-3">
             {challenges.map((c) => {
               const result = c.status === "active" ? evaluateChallenge(c, matches) : null;
@@ -162,12 +163,13 @@ export function ChallengesBoard() {
 
       <div>
         <h2 className="text-sm font-semibold text-ink mb-3">
-          Suggested for you, from your last {matches.length} games
+          Предложено для тебя на основе {matches.length}{" "}
+          {pluralRu(matches.length, ["последней игры", "последних игр", "последних игр"])}
         </h2>
         {candidates.length === 0 ? (
           <p className="text-sm text-ink-muted">
-            No new suggestions right now - your recent stats don&apos;t show
-            an obvious gap, or you&apos;ve already started every suggestion.
+            Новых предложений пока нет - в свежей статистике не видно явных
+            слабых мест, или ты уже начал все предложенные испытания.
           </p>
         ) : (
           <div className="space-y-3">
@@ -183,8 +185,8 @@ export function ChallengesBoard() {
       </div>
 
       <p className="text-xs text-ink-muted">
-        Progress is saved in this browser only - it won&apos;t follow you to
-        another device.
+        Прогресс хранится только в этом браузере - на другом устройстве его
+        не будет.
       </p>
     </div>
   );

@@ -26,11 +26,13 @@ export function MatchHistory({
         `/api/player/${accountId}/matches?limit=${PAGE_SIZE}&offset=${matches.length}`
       );
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to load matches");
+      if (!res.ok) throw new Error(data.error);
       setMatches((prev) => [...prev, ...data.matches]);
       setHasMore(data.hasMore);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load matches");
+    } catch {
+      // The API/network error text is English and technical - show the
+      // player a plain Russian message instead.
+      setError("Не удалось загрузить игры. Попробуй ещё раз через минуту.");
     } finally {
       setLoading(false);
     }
@@ -50,7 +52,7 @@ export function MatchHistory({
           disabled={loading}
           className="w-full mt-3 text-sm text-ink-secondary hover:text-ink border border-border rounded-md py-2 transition disabled:opacity-50"
         >
-          {loading ? "Loading..." : "Load more matches"}
+          {loading ? "Загрузка..." : "Показать ещё игры"}
         </button>
       )}
     </div>

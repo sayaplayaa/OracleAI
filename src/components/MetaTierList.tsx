@@ -2,95 +2,92 @@
 
 import { useEffect, useState } from "react";
 import { HeroIcon } from "./HeroIcon";
+import { pluralRu } from "@/lib/format";
 import type { MetaTierEntry } from "@/lib/types";
 
-const ROLE_FILTERS: { value: string; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "POSITION_1", label: "Carry" },
-  { value: "POSITION_2", label: "Mid" },
-  { value: "POSITION_3", label: "Offlane" },
-  { value: "POSITION_4", label: "Support" },
-  { value: "POSITION_5", label: "Hard Support" },
+const POSITIONS: { value: string; label: string }[] = [
+  { value: "POSITION_1", label: "Керри" },
+  { value: "POSITION_2", label: "Мид" },
+  { value: "POSITION_3", label: "Оффлейн" },
+  { value: "POSITION_4", label: "Поддержка" },
+  { value: "POSITION_5", label: "Хард-саппорт" },
 ];
 
+function PositionColumn({ label, entries }: { label: string; entries: MetaTierEntry[] }) {
+  return (
+    <div className="bg-surface border border-border rounded-lg overflow-hidden">
+      <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-ink-secondary border-b border-border">
+        {label}
+      </div>
+      {entries.length === 0 ? (
+        <p className="text-xs text-ink-muted px-3 py-3">
+          На этой неделе мало игр на ранге Легенда и выше.
+        </p>
+      ) : (
+        <div className="divide-y divide-border">
+          {entries.map((e, i) => (
+            <div key={e.heroId} className="flex items-center gap-2 px-3 py-2">
+              <span className="text-xs font-mono text-ink-muted w-4 shrink-0">{i + 1}</span>
+              <HeroIcon heroId={e.heroId} size={24} />
+              <span className="text-sm text-ink truncate flex-1 min-w-0">{e.heroName}</span>
+              <span
+                className="text-[11px] font-mono text-ink-muted shrink-0"
+                title={`${e.games.toLocaleString("ru-RU")} ${pluralRu(e.games, ["игра", "игры", "игр"])}`}
+              >
+                {e.games.toLocaleString("ru-RU")}
+              </span>
+              <span
+                className="text-xs font-mono font-semibold text-right w-12 shrink-0"
+                style={{
+                  color:
+                    e.winRate >= 0.5
+                      ? "var(--color-status-good)"
+                      : "var(--color-status-critical)",
+                }}
+              >
+                {(e.winRate * 100).toFixed(1)}%
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function MetaTierList() {
-  const [role, setRole] = useState("all");
-  const [entries, setEntries] = useState<MetaTierEntry[] | null>(null);
+  const [data, setData] = useState<Record<string, MetaTierEntry[]> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setLoading(true);
-    setError(null);
-    fetch(`/api/meta?role=${role}`)
+    fetch("/api/meta")
       .then(async (res) => {
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error ?? "Failed to load meta data");
-        setEntries(data as MetaTierEntry[]);
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error ?? "Не удалось загрузить мету");
+        setData(body as Record<string, MetaTierEntry[]>);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load meta data"))
+      .catch((err) => setError(err instanceof Error ? err.message : "Не удалось загрузить мету"))
       .finally(() => setLoading(false));
-  }, [role]);
+  }, []);
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap gap-1.5">
-        {ROLE_FILTERS.map((f) => (
-          <button
-            key={f.value}
-            onClick={() => setRole(f.value)}
-            className={`text-xs font-medium px-3 py-1.5 rounded-md border transition ${
-              role === f.value
-                ? "border-accent bg-accent/10 text-ink"
-                : "border-border text-ink-muted hover:text-ink"
-            }`}
-          >
-            {f.label}
-          </button>
-        ))}
-      </div>
+    <div className="space-y-3">
+      <p className="text-xs text-ink-muted">
+        Лучшие герои на каждой позиции за эту неделю, только ранги Легенда и
+        выше. Сортировка по винрейту с поправкой на размер выборки: нужен
+        реальный минимум игр, так что случайные офф-мета пики в список не
+        попадают.
+      </p>
 
-      {loading && <p className="text-sm text-ink-muted">Loading current-week meta...</p>}
+      {loading && <p className="text-sm text-ink-muted">Загружаю мету этой недели...</p>}
       {error && <p className="text-sm text-status-critical">{error}</p>}
 
-      {entries && (
-        <div className="bg-surface border border-border rounded-lg overflow-hidden">
-          <div className="grid grid-cols-[2rem_1fr_5rem_5rem_5rem] gap-2 px-3 py-2 text-[11px] uppercase tracking-wide text-ink-muted border-b border-border">
-            <span>#</span>
-            <span>Hero</span>
-            <span className="text-right">Role</span>
-            <span className="text-right">Games</span>
-            <span className="text-right">Win rate</span>
-          </div>
-          <div className="divide-y divide-border">
-            {entries.map((e, i) => (
-              <div
-                key={`${e.heroId}-${e.position}`}
-                className="grid grid-cols-[2rem_1fr_5rem_5rem_5rem] gap-2 px-3 py-2 items-center hover:bg-surface-raised/60 transition"
-              >
-                <span className="text-xs font-mono text-ink-muted">{i + 1}</span>
-                <span className="flex items-center gap-2 min-w-0">
-                  <HeroIcon heroId={e.heroId} size={26} />
-                  <span className="text-sm text-ink truncate">{e.heroName}</span>
-                </span>
-                <span className="text-xs text-ink-muted text-right">{e.roleLabel}</span>
-                <span className="text-xs font-mono text-ink-muted text-right">
-                  {e.games.toLocaleString()}
-                </span>
-                <span
-                  className="text-xs font-mono font-semibold text-right"
-                  style={{
-                    color:
-                      e.winRate >= 0.5
-                        ? "var(--color-status-good)"
-                        : "var(--color-status-critical)",
-                  }}
-                >
-                  {(e.winRate * 100).toFixed(1)}%
-                </span>
-              </div>
-            ))}
-          </div>
+      {data && (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          {POSITIONS.map((p) => (
+            <PositionColumn key={p.value} label={p.label} entries={data[p.value] ?? []} />
+          ))}
         </div>
       )}
     </div>

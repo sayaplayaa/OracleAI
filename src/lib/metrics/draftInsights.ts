@@ -1,6 +1,6 @@
 import { getHeroName } from "../constants";
 import type { DraftInsights, HeroMatchup, OpenDotaMatchupEntry } from "../types";
-import { formatStratzPosition, type StratzLaneOutcome } from "../stratz";
+import type { StratzLaneOutcome } from "../stratz";
 import { wilsonScoreLowerBound, wilsonScoreUpperBound } from "./statistics";
 
 // Below this sample size a matchup's win rate is too noisy to act on.
@@ -45,7 +45,14 @@ function computeLaneSynergy(laneSynergy: StratzLaneOutcome[]): {
     .slice(0, LIST_SIZE)
     .map(({ _rankScore, ...entry }) => entry);
 
-  return { bestLanePartners, lanePosition: formatStratzPosition(dominantPosition) };
+  return { bestLanePartners, lanePosition: formatLanePosition(dominantPosition) };
+}
+
+// Shown as-is in the lane-partner heading ("позиция 1").
+function formatLanePosition(position: string): string {
+  if (!position) return "позиция неизвестна";
+  const match = position.match(/POSITION_(\d)/);
+  return match ? `позиция ${match[1]}` : position;
 }
 
 export function computeDraftInsights(

@@ -10,7 +10,7 @@ export async function GET(
   const { heroId: heroIdParam } = await params;
   const heroId = Number(heroIdParam);
   if (!Number.isInteger(heroId) || heroId <= 0) {
-    return NextResponse.json({ error: "Invalid hero id" }, { status: 400 });
+    return NextResponse.json({ error: "Некорректный id героя" }, { status: 400 });
   }
 
   try {
@@ -26,7 +26,7 @@ export async function GET(
     return NextResponse.json(computeDraftInsights(heroId, matchups, laneSynergy));
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to load matchups" },
+      { error: err instanceof Error ? err.message : "Не удалось загрузить матчапы" },
       { status: 502 }
     );
   }

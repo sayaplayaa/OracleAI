@@ -1,11 +1,17 @@
 import type { TrendMatchSummary } from "./types";
+import { pluralRu } from "./format";
 
 export type ChallengeType = "death_control" | "kda_breakout" | "signature_hero_farm";
 
+// Only numbers/ids are kept here (and in localStorage); the text shown to the
+// player is built at render time by describeChallenge(). Challenges saved by
+// older versions also carry an English `description` field - it is ignored.
 export interface ChallengeCandidate {
   type: ChallengeType;
-  description: string;
   target: number;
+  /** The player's recent average for this stat when the challenge was
+   * suggested. Missing on challenges saved by older versions. */
+  baseline?: number;
   heroId?: number;
   heroName?: string;
 }
@@ -31,6 +37,47 @@ function computeKda(m: TrendMatchSummary): number {
   return m.deaths === 0 ? m.kills + m.assists : (m.kills + m.assists) / m.deaths;
 }
 
+/** Russian decimal formatting: 5.3 -> "5,3". */
+function formatNumber(value: number, minDigits: number, maxDigits: number): string {
+  return value.toLocaleString("ru-RU", {
+    minimumFractionDigits: minDigits,
+    maximumFractionDigits: maxDigits,
+  });
+}
+
+/** The challenge text the player sees, in Russian. */
+export function describeChallenge(c: ChallengeCandidate): string {
+  const baseline =
+    typeof c.baseline === "number" && Number.isFinite(c.baseline) ? c.baseline : null;
+  switch (c.type) {
+    case "death_control": {
+      const times = pluralRu(c.target, ["раза", "раз", "раз"]);
+      const avg =
+        baseline !== null
+          ? ` (твоё среднее за последние игры: ${formatNumber(baseline, 1, 1)})`
+          : "";
+      return `Закончи игру, умерев меньше ${c.target} ${times}${avg}`;
+    }
+    case "kda_breakout": {
+      const avg =
+        baseline !== null
+          ? ` (твоё среднее за последние игры: ${formatNumber(baseline, 2, 2)})`
+          : "";
+      return `Сыграй одну из ближайших игр с KDA выше ${formatNumber(c.target, 0, 1)}${avg}`;
+    }
+    case "signature_hero_farm": {
+      const hero = c.heroName ?? "своём основном герое";
+      const avg =
+        baseline !== null
+          ? ` (твоё среднее на нём: ${Math.round(baseline).toLocaleString("ru-RU")})`
+          : "";
+      return `Набери ${c.target.toLocaleString("ru-RU")} GPM на ${hero} в следующей игре на этом герое${avg}`;
+    }
+    default:
+      return "Испытание";
+  }
+}
+
 /**
  * Deterministic, rule-based suggestions from the player's own real recent
  * matches - no AI involved, since these are precise numeric thresholds
@@ -45,8 +92,8 @@ export function generateCandidates(matches: TrendMatchSummary[]): ChallengeCandi
     const target = Math.max(2, Math.round(avgDeaths) - 2);
     candidates.push({
       type: "death_control",
-      description: `Finish a game with fewer than ${target} deaths (your recent average is ${avgDeaths.toFixed(1)})`,
       target,
+      baseline: avgDeaths,
     });
   }
 
@@ -54,8 +101,8 @@ export function generateCandidates(matches: TrendMatchSummary[]): ChallengeCandi
   const kdaTarget = Math.round(avgKda * 1.3 * 10) / 10;
   candidates.push({
     type: "kda_breakout",
-    description: `Post a KDA above ${kdaTarget} in an upcoming game (your recent average is ${avgKda.toFixed(2)})`,
     target: kdaTarget,
+    baseline: avgKda,
   });
 
   const heroCounts = new Map<number, number>();
@@ -71,8 +118,8 @@ export function generateCandidates(matches: TrendMatchSummary[]): ChallengeCandi
       const gpmTarget = Math.round((avgGpm * 1.1) / 10) * 10;
       candidates.push({
         type: "signature_hero_farm",
-        description: `Hit ${gpmTarget} GPM on ${heroMatches[0].heroName} in your next game on that hero (recent average is ${Math.round(avgGpm)})`,
         target: gpmTarget,
+        baseline: avgGpm,
         heroId: topHeroId,
         heroName: heroMatches[0].heroName,
       });
