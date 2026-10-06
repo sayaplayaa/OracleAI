@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getMatch, getBenchmarks, ensureMatchParsed } from "@/lib/opendota";
-import { getMatchDeathEvents, getMatchPlayerPositions } from "@/lib/stratz";
+import { getMatchDeathEvents, getMatchPlayerPositions, getMatchPositionTracks } from "@/lib/stratz";
 import { computeMatchMetrics } from "@/lib/metrics/matchMetrics";
 import { computeDeathVision } from "@/lib/metrics/deathVision";
 import { fetchMetaItemTiming } from "@/lib/metrics/matchItemContext";
 import { resolveAllPositions } from "@/lib/metrics/matchPositions";
 import { buildMatchAnalysis } from "@/lib/metrics/matchAnalysis";
+import { isAnalysableMode, isTurbo } from "@/lib/metrics/gameContext";
 import { coachMatch } from "@/lib/coach/client";
 import type { CoachReport } from "@/lib/types";
 
@@ -33,6 +34,12 @@ async function buildReport(matchId: number, accountId: number): Promise<CoachRep
   let match = await getMatch(matchId);
   const player = match.players.find((p) => p.account_id === accountId);
   if (!player) throw new CoachRouteError("Этот игрок не играл в этом матче", 404);
+  if (!isAnalysableMode(match.game_mode)) {
+    throw new CoachRouteError(
+      "Разбор работает только для обычных игр 5 на 5 (включая Turbo) - в этом режиме нет позиций и соперника на твоей роли.",
+      422
+    );
+  }
 
   // The coach report is much weaker without a real death/teamfight/item
   // timeline - request a parse and wait for it rather than immediately
@@ -46,21 +53,31 @@ async function buildReport(matchId: number, accountId: number): Promise<CoachRep
   // players; OpenDota's own estimate and a lane heuristic are the fallbacks.
   // Every player is compared only with the enemy player on the same position.
   // Its death events (exact spot, killing ability) are best-effort too.
-  const [stratzPositions, stratzDeaths] = await Promise.all([
+  // Every hero's movement shows how the player stood in fights; best-effort.
+  const [stratzPositions, stratzDeaths, positionTracks] = await Promise.all([
     getMatchPlayerPositions(matchId).catch(() => null),
     getMatchDeathEvents(matchId).catch(() => null),
+    getMatchPositionTracks(matchId).catch(() => null),
   ]);
   const positions = resolveAllPositions(match, stratzPositions);
   const position = positions.bySlot.get(player.player_slot) ?? 3;
 
   // Real core-item build timing for this hero+position, from STRATZ's
-  // aggregate of the broader current playerbase.
-  const metaItemTiming = await fetchMetaItemTiming(player.hero_id, `POSITION_${position}`);
+  // aggregate of the broader current playerbase - normal games, so there's
+  // nothing to compare a Turbo game's timings against.
+  const metaItemTiming = isTurbo(match.game_mode) ? [] : await fetchMetaItemTiming(player.hero_id, `POSITION_${position}`);
 
   const deathVision = computeDeathVision(match, accountId, metrics.deathLog, stratzDeaths);
-  const analysis = buildMatchAnalysis({ match, accountId, positions, metrics, metaItemTiming, deathVision });
+  const analysis = buildMatchAnalysis({ match, accountId, positions, metrics, metaItemTiming, deathVision, positionTracks });
   const report = await coachMatch(analysis);
-  return { ...report, deathVision };
+  // After a player leaves, their hero is in teammates' hands - those deaths aren't theirs.
+  const leftAt = analysis.context.leavers.find((l) => l.isYou)?.time ?? null;
+  return {
+    ...report,
+    deathVision: leftAt === null ? deathVision : deathVision.filter((d) => d.time < leftAt),
+    context: analysis.context,
+    ...(analysis.gameFlow ? { gameFlow: analysis.gameFlow } : {}),
+  };
 }
 
 export async function POST(req: NextRequest) {

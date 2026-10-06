@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRecentMatches, getHeroStats, getMatch } from "@/lib/opendota";
-import { computeTrendMetrics } from "@/lib/metrics/trendMetrics";
+import { getRecentMatches, getRecentHeroStats, getMatch } from "@/lib/opendota";
+import { computeTrendMetrics, HERO_WINDOW_DAYS } from "@/lib/metrics/trendMetrics";
 import { computeCrossMatchPatterns } from "@/lib/metrics/trendPatterns";
+import { inFamily, leftTheGame } from "@/lib/metrics/gameContext";
 import { coachTrends } from "@/lib/coach/client";
+import { pluralRu } from "@/lib/format";
 import type { OpenDotaMatch } from "@/lib/types";
 
 // Independent of the lightweight match-list `limit` - fetching full match
@@ -10,6 +12,8 @@ import type { OpenDotaMatch } from "@/lib/types";
 // analysis (deaths, lane comparisons) always looks at at most this many,
 // newest first. Matches computeCrossMatchPatterns' own bound.
 const DEEP_SAMPLE_SIZE = 10;
+// Fewer comparable games than this and a "trend" is one or two games' story.
+const MIN_TREND_GAMES = 5;
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
@@ -21,21 +25,36 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const [matches, heroStats] = await Promise.all([
-      getRecentMatches(accountId, limit),
-      getHeroStats(accountId),
-    ]);
+    const matches = await getRecentMatches(accountId, limit);
+    const base = computeTrendMetrics(accountId, matches);
+    if (base.sampleSize < MIN_TREND_GAMES) {
+      return NextResponse.json(
+        {
+          error:
+            matches.length === 0
+              ? "Не видно ни одной недавней игры - проверь, что в Dota 2 включена опция «Expose Public Match Data»."
+              : `Для трендов нужно хотя бы ${MIN_TREND_GAMES} сравнимых игр, а среди последних ${matches.length} их ${base.sampleSize} ${pluralRu(base.sampleSize, ["игра", "игры", "игр"])} (Turbo и обычные игры не смешиваются, игры, которые ты покинул, не учитываются).`,
+        },
+        { status: 422 }
+      );
+    }
 
     // Best-effort: a match that fails to fetch just contributes nothing to
     // the cross-match patterns rather than failing the whole report.
-    const fullMatches = (
-      await Promise.all(
-        matches.slice(0, DEEP_SAMPLE_SIZE).map((m) => getMatch(m.match_id).catch(() => null))
-      )
-    ).filter((m): m is OpenDotaMatch => m !== null);
+    const deep = matches
+      .filter((m) => inFamily(m.game_mode, base.turbo) && !leftTheGame(m.leaver_status))
+      .slice(0, DEEP_SAMPLE_SIZE);
+    const [heroStats, fullMatches] = await Promise.all([
+      getRecentHeroStats(accountId, HERO_WINDOW_DAYS, base.turbo).catch(() => []),
+      Promise.all(deep.map((m) => getMatch(m.match_id).catch(() => null))),
+    ]);
 
-    const patterns = computeCrossMatchPatterns(accountId, fullMatches);
     const metrics = computeTrendMetrics(accountId, matches, heroStats);
+    const patterns = computeCrossMatchPatterns(
+      accountId,
+      fullMatches.filter((m): m is OpenDotaMatch => m !== null),
+      metrics.turbo
+    );
 
     const report = await coachTrends(metrics, patterns);
     return NextResponse.json(report);

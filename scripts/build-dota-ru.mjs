@@ -31,10 +31,12 @@ async function loadSource() {
 // Valve KeyValues: one `"key"   "value"` pair per line inside "Tokens" { ... }.
 function parseTokens(text) {
   const tokens = new Map();
-  const line = /^\s*"([^"]+)"\s+"((?:[^"\\]|\\.)*)"/;
+  // Key and value aren't always separated by whitespace ("..._15""+{s:value}%").
+  const line = /^\s*"([^"]+)"\s*"((?:[^"\\]|\\.)*)"/;
   for (const raw of text.replace(/^﻿/, "").split(/\r?\n/)) {
     const m = raw.match(line);
-    if (m) tokens.set(m[1], m[2].replace(/\\"/g, '"').replace(/\\n/g, "\n"));
+    // Looked up lower-cased: Valve spells some keys "DOTA_Tooltip_Ability_...".
+    if (m) tokens.set(m[1].toLowerCase(), m[2].replace(/\\"/g, '"').replace(/\\n/g, "\n"));
   }
   return tokens;
 }
@@ -50,28 +52,134 @@ for (const hero of Object.values(dc.hero_abilities)) {
     const ability = dc.abilities[key];
     if (!ability?.dname) continue;
     const entry = {};
-    const desc = tokens.get(`DOTA_Tooltip_ability_${key}_Description`);
+    const desc = tokens.get(`dota_tooltip_ability_${key}_description`.toLowerCase());
     if (desc) entry.desc = desc;
     const headers = {};
     for (const a of ability.attrib ?? []) {
       if (!a.key) continue;
-      const header = tokens.get(`DOTA_Tooltip_ability_${key}_${a.key}`);
+      const header = tokens.get(`dota_tooltip_ability_${key}_${a.key}`.toLowerCase());
       if (header) headers[a.key] = header;
     }
     if (Object.keys(headers).length > 0) entry.headers = headers;
     if (Object.keys(entry).length > 0) abilities[key] = entry;
   }
-  for (const t of hero.talents ?? []) {
-    const value = tokens.get(`DOTA_Tooltip_ability_${t.name}`);
-    if (value) talents[t.name] = value;
+}
+// Every talent the Russian client has text for, not just dotaconstants' list:
+// that list lags behind patches (Tiny's +8 Strength is +10 in the game), and
+// the talents shown come from real match/STRATZ data, so a live talent missing
+// from it fell back to English.
+for (const [key, value] of tokens) {
+  const m = /^dota_tooltip_ability_(special_bonus_[a-z0-9_]+)$/.exec(key);
+  if (m && !/_(?:description|note\d*|lore)$/i.test(m[1])) talents[m[1]] = value;
+}
+
+// ---- Talent numbers ----
+// Talent text is a template ("+{s:bonus_mana_void_aoe_radius} к радиусу Mana
+// Void") and dotaconstants doesn't carry hero-talent values, so 70% of talents
+// showed "+?". Valve keeps each value inside the ability it changes:
+//   "mana_void_aoe_radius" { "value" "400 450 500"
+//     "special_bonus_unique_antimage_manavoid_aoe" "+200" }
+// -> placeholder "bonus_" + value name. Generic talents ("+3 к регенерации")
+// carry their own "value".
+const NPC_URL = "https://raw.githubusercontent.com/dotabuff/d2vpkr/master/dota/scripts/npc";
+
+// Valve KeyValues: quoted keys/values, nested { } blocks, // comments.
+function parseKeyValues(source) {
+  let i = 0;
+  const skip = () => {
+    for (;;) {
+      while (i < source.length && /\s/.test(source[i])) i++;
+      if (source.startsWith("//", i)) {
+        while (i < source.length && source[i] !== "\n") i++;
+      } else return;
+    }
+  };
+  const read = () => {
+    skip();
+    if (source[i] === '"') {
+      const end = source.indexOf('"', i + 1);
+      const s = source.slice(i + 1, end);
+      i = end + 1;
+      return s;
+    }
+    const m = /^[^\s{}"]+/.exec(source.slice(i));
+    if (!m) return null;
+    i += m[0].length;
+    return m[0];
+  };
+  const block = () => {
+    const out = {};
+    for (;;) {
+      skip();
+      if (i >= source.length || source[i] === "}") {
+        i++;
+        return out;
+      }
+      const key = read();
+      if (key === null) return out;
+      skip();
+      if (source[i] === "[") while (i < source.length && source[i - 1] !== "]") i++; // platform conditional
+      skip();
+      let value;
+      if (source[i] === "{") {
+        i++;
+        value = block();
+      } else value = read();
+      if (!(key in out)) out[key] = value;
+    }
+  };
+  return block();
+}
+
+function collectTalentValues(node, out) {
+  if (!node || typeof node !== "object") return;
+  for (const [name, entry] of Object.entries(node)) {
+    if (!entry || typeof entry !== "object") continue;
+    const values = entry.AbilityValues;
+    if (values && typeof values === "object") {
+      for (const [valueName, value] of Object.entries(values)) {
+        if (name.startsWith("special_bonus_")) {
+          const own = typeof value === "object" ? value.value : value;
+          if (own !== undefined) (out[name] ??= {})[valueName] = String(own);
+        }
+        if (value && typeof value === "object") {
+          for (const [k, v] of Object.entries(value)) {
+            if (k.startsWith("special_bonus_")) (out[k] ??= {})[`bonus_${valueName}`] = String(v);
+          }
+        }
+      }
+    }
+    collectTalentValues(entry, out);
   }
 }
+
+async function fetchText(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Download failed: ${res.status} ${url}`);
+  return res.text();
+}
+
+const talentValues = {};
+collectTalentValues(parseKeyValues(await fetchText(`${NPC_URL}/npc_abilities.txt`)), talentValues);
+for (const hero of Object.values(dc.heroes)) {
+  const file = `${NPC_URL}/heroes/${hero.name}.txt`;
+  try {
+    collectTalentValues(parseKeyValues(await fetchText(file)), talentValues);
+  } catch (err) {
+    console.warn(`Skipped ${file}: ${err.message}`);
+  }
+}
+// Every talent's numbers - also for talents without Russian text, which the
+// game shows in English, filled with the same values.
+const usedTalentValues = Object.fromEntries(
+  Object.entries(talentValues).filter(([name]) => name.startsWith("special_bonus_"))
+);
 
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(
   OUT,
-  JSON.stringify({ source: SOURCE_URL, builtAt: new Date().toISOString(), abilities, talents })
+  JSON.stringify({ source: SOURCE_URL, builtAt: new Date().toISOString(), abilities, talents, talentValues: usedTalentValues })
 );
 console.log(
-  `Wrote ${OUT}: ${Object.keys(abilities).length} abilities, ${Object.keys(talents).length} talents (${tokens.size} tokens parsed).`
+  `Wrote ${OUT}: ${Object.keys(abilities).length} abilities, ${Object.keys(talents).length} talents (${Object.keys(usedTalentValues).length} with values; ${tokens.size} tokens parsed).`
 );

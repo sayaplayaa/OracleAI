@@ -6,6 +6,8 @@ import { formatMatchTime, pluralRu, timeAgoRu } from "@/lib/format";
 import type { OpenDotaRecentMatch } from "@/lib/types";
 import { HeroIcon } from "./HeroIcon";
 import { AnalyzedBadge } from "./AnalyzedBadge";
+import { ModeChip } from "./MatchCard";
+import { modeTag } from "@/lib/metrics/gameContext";
 
 export type GamesFilter = "all" | "wins" | "losses";
 
@@ -61,8 +63,9 @@ export function GameCard({ accountId, game }: { accountId: number; game: OpenDot
         </span>
       </div>
       <div className="flex-1 flex flex-col gap-2 px-4 pb-4 -mt-5 relative">
-        <div className="flex items-end gap-2">
+        <div className="flex items-center gap-2">
           <h3 className="font-semibold text-ink truncate">{getHeroName(game.hero_id)}</h3>
+          <ModeChip tag={modeTag(game.game_mode)} />
         </div>
         <div className="flex items-center gap-3 text-xs font-mono tabular-nums text-ink-secondary">
           <span>

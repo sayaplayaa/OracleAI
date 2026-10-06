@@ -49,6 +49,9 @@ export interface OpenDotaRecentMatch {
   lane_role?: number;
   is_roaming?: boolean;
   party_size?: number | null;
+  // 0 = stayed; 1 = disconnected but came back; 2+ = left the game for good
+  // (abandoned, AFK, never connected).
+  leaver_status?: number | null;
 }
 
 export interface OpenDotaHeroStat {
@@ -121,6 +124,12 @@ export interface OpenDotaMatchPlayer {
   networth_t?: number[];
   // OpenDota's own 1-5 position estimate for this player.
   position_est?: number;
+  // 0 = stayed; 1 = disconnected but came back; 2+ = left the game for good
+  // (abandoned, AFK, never connected).
+  leaver_status?: number;
+  connection_log?: { time: number; event: string }[];
+  // Times an item was used, by item key (e.g. tpscroll).
+  item_uses?: Record<string, number>;
   deaths_log?: { time: number; key: string; gold_lost?: number; time_dead?: number }[];
   buyback_log?: { time: number }[];
   // Seconds by life state: "0" alive, "2" dead (1 is the brief dying state).
@@ -377,6 +386,9 @@ export interface TrendMatchSummary {
   // genuinely unavailable for this match, never a fabricated 0.
   gpm: number | null;
   xpm: number | null;
+  gameMode: number;
+  // The player left this game (abandon/disconnect for good).
+  leftGame: boolean;
 }
 
 // A count of how many sampled games this player was ahead/behind/tied
@@ -394,35 +406,64 @@ export interface LaneTally {
 // Games OpenDota hasn't parsed contribute nothing (never guessed).
 export interface CrossMatchPatterns {
   parsedGamesSampled: number;
-  recurringKillers: { killerHeroName: string; count: number }[];
+  // Position (1-5) -> games, as estimated per match.
+  positions: Record<number, number>;
+  // End of the laning stage these patterns use ("10:00", or "7:00" in Turbo).
+  laneEndLabel: string;
+  deaths: {
+    total: number;
+    beforeLaneEnd: number;
+    // Deaths outside any teamfight - caught alone.
+    outsideFights: number;
+    // Games with 2+ deaths before the end of laning.
+    gamesWithRoughLane: number;
+  };
+  // Enemy heroes that killed the player in at least two different games.
+  recurringKillers: { killerHeroName: string; deaths: number; games: number }[];
+  // Against the enemy on the same position at the end of laning.
+  laneNetWorth: LaneTally;
+  // Core positions only: last hits are no measure of a support.
   laneLastHits: LaneTally;
-  laneGold: LaneTally;
+}
+
+export interface TrendSplit {
+  games: number;
+  avgKills: number;
+  avgDeaths: number;
+  avgAssists: number;
+  avgGpm: number | null;
+  avgLastHitsPerMin: number | null;
+}
+
+export interface TrendHero {
+  heroId: number;
+  heroName: string;
+  games: number;
+  winRate: number;
 }
 
 export interface TrendMetrics {
   accountId: number;
+  // Comparable games only (see comparableGames): the player's main kind of
+  // game - Turbo or normal - minus games they left.
   sampleSize: number;
+  turbo: boolean;
+  // Recent games left out of the averages (other mode, or the player left).
+  excludedGames: number;
   winRate: number;
   avgKda: number;
   avgGpm: number | null;
   avgXpm: number | null;
   avgDeaths: number;
-  gpmTrend: { match: number; value: number }[];
-  xpmTrend: { match: number; value: number }[];
-  deathsTrend: { match: number; value: number }[];
-  roleDistribution: Record<string, number>;
-  topHeroes: {
-    heroId: number;
-    heroName: string;
-    games: number;
-    winRate: number;
-  }[];
-  worstHeroes: {
-    heroId: number;
-    heroName: string;
-    games: number;
-    winRate: number;
-  }[];
+  // What changes between this player's wins and their losses - the most
+  // direct pointer at what loses them games. Null with fewer than 3 of either.
+  winsVsLosses: { wins: TrendSplit; losses: TrendSplit } | null;
+  // Over the last `heroWindowDays` days, ranked with the sample size taken
+  // into account (Wilson bound), not by raw win rate.
+  heroWindowDays: number;
+  topHeroes: TrendHero[];
+  worstHeroes: TrendHero[];
+  // Every recent game, newest first (for lists).
   recentMatches: TrendMatchSummary[];
 }
 
@@ -457,6 +498,9 @@ export interface ProHeroSpotlight {
 export interface CoachFinding {
   point: string;
   metric: string; // the specific metric/value that grounds this claim
+  // A measurable goal for the next game, worked out in code from this game's
+  // real numbers (e.g. "0 смертей до 10:00 (в этой игре - 3)").
+  target?: string;
 }
 
 // A real chronological moment (a death, a teamfight, an item timing) from a
@@ -533,6 +577,59 @@ export interface DeathVisionMoment {
 
 // ---- Role-aware single-match analysis (worked out in code, narrated by the AI) ----
 
+// Things about the game itself that change how it should be read: Turbo's
+// different economy, and players who left. Worked out in code from the match.
+export interface MatchLeaver {
+  heroId: number;
+  heroName: string;
+  yourTeam: boolean;
+  isYou: boolean;
+  isCounterpart: boolean;
+  // When they left for good (last disconnect without a reconnect); null when
+  // the replay doesn't say.
+  time: number | null;
+}
+
+export interface GameContext {
+  turbo: boolean;
+  leavers: MatchLeaver[];
+  // Short lines for the player, in Russian - shown above the report.
+  notes: string[];
+}
+
+// How the whole game went for the player's team - a lead that was thrown, a
+// comeback, a stomp - and the fights that decided it. Worked out in code from
+// the team gold curve, the replay's teamfights and every player's deaths.
+export type GameFlowKind = "throw" | "comeback" | "stomp-win" | "stomp-loss" | "close-win" | "close-loss";
+
+export interface FlowFight {
+  time: number;
+  timeLabel: string;
+  // Where the deaths happened, relative to the player's team ("вражеская база").
+  place: string | null;
+  yourTeamDeaths: number;
+  enemyDeaths: number;
+  // The team's gold lead the minute before and the minute after.
+  leadBefore: number | null;
+  leadAfter: number | null;
+  // The team had a fresh Aegis.
+  aegis: boolean;
+  // What the player did in it, one short phrase ("погиб первым из команды").
+  yourPart: string;
+}
+
+export interface GameFlow {
+  kind: GameFlowKind;
+  headline: string;
+  peakLead: { minute: number; gold: number } | null;
+  peakDeficit: { minute: number; gold: number } | null;
+  // The team's gold lead per minute (negative = behind).
+  lead: number[];
+  keyFights: FlowFight[];
+  // Lines for the model and the evidence list, in Russian.
+  facts: string[];
+}
+
 export type PhaseId = "laning" | "midGame" | "lateGame";
 export type PhaseVerdict = "won" | "even" | "lost";
 export type PositionSource = "stratz" | "opendota" | "lane-estimate";
@@ -589,6 +686,11 @@ export interface MatchAnalysis {
   // The top verified problems across all phases, each with what a coach teaches for it.
   priorities: CoachFinding[];
   buybacksUsed: number;
+  context: GameContext;
+  // Every death of this player (seconds), for checking count claims.
+  deathTimes: number[];
+  // Null when the replay has no team gold curve.
+  gameFlow: GameFlow | null;
 }
 
 export interface CoachPhaseReport {
@@ -623,6 +725,10 @@ export interface CoachReport {
   // Only the single-match coach report populates this - computed
   // deterministically from real match data, not part of the AI's own output.
   deathVision?: DeathVisionMoment[];
+  // Single-match report only: Turbo / leavers, shown above everything else.
+  context?: GameContext;
+  // Single-match report only: how the whole game went and what decided it.
+  gameFlow?: GameFlow;
   strengths: CoachFinding[];
   weaknesses: CoachFinding[];
   tips: CoachFinding[];

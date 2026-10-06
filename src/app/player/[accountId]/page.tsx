@@ -171,7 +171,7 @@ export default async function PlayerPage({ params, searchParams }: PageProps<"/p
   }
   const own = (await getSessionAccountId()) === accountId;
 
-  const trends = computeTrendMetrics(accountId, matches, heroStats);
+  const trends = computeTrendMetrics(accountId, matches);
   const notableMatches = selectNotableMatches(trends.recentMatches, trends.avgKda, HIGHLIGHT_COUNT);
   const signatureHero = findSignatureHero(heroStats);
   const rankInfo = getRankInfo(profile.computed_mmr, profile.leaderboard_rank);
@@ -211,7 +211,7 @@ export default async function PlayerPage({ params, searchParams }: PageProps<"/p
   }
 
   const overviewContent =
-    trends.sampleSize === 0 ? (
+    trends.recentMatches.length === 0 ? (
       <div className="bg-surface border border-border rounded-2xl p-8 text-center text-sm text-ink-secondary">
         Не нашли недавних игр этого игрока. Возможно, у него выключена опция «Expose Public Match Data».
       </div>
@@ -219,7 +219,7 @@ export default async function PlayerPage({ params, searchParams }: PageProps<"/p
       <div className="space-y-8">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <StatTile
-            label={`Винрейт · последние ${trends.sampleSize}`}
+            label={`Винрейт · ${trends.sampleSize} ${trends.turbo ? "Turbo-" : ""}${pluralRu(trends.sampleSize, ["игра", "игры", "игр"])}`}
             value={`${Math.round(trends.winRate * 100)}%`}
             accent={trends.winRate >= 0.5 ? "var(--color-status-good)" : "var(--color-status-critical)"}
           />
@@ -237,7 +237,7 @@ export default async function PlayerPage({ params, searchParams }: PageProps<"/p
             <section>
               <SectionHeading
                 title="Игры, которые стоит разобрать"
-                note={`Из последних ${trends.sampleSize} ${pluralRu(trends.sampleSize, ["игры", "игр", "игр"])}: сначала поражения, потом игры, где KDA или смерти заметно хуже среднего.`}
+                note={`Из последних ${trends.recentMatches.length} ${pluralRu(trends.recentMatches.length, ["игры", "игр", "игр"])}: сначала поражения, потом игры, где KDA или смерти заметно хуже среднего.`}
               />
               <div className="bg-surface border border-border rounded-2xl divide-y divide-border overflow-hidden">
                 {notableMatches.map((m) => (

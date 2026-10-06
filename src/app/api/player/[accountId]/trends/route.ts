@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRecentMatches, getHeroStats } from "@/lib/opendota";
-import { computeTrendMetrics } from "@/lib/metrics/trendMetrics";
+import { getRecentMatches, getRecentHeroStats } from "@/lib/opendota";
+import { computeTrendMetrics, HERO_WINDOW_DAYS } from "@/lib/metrics/trendMetrics";
 
 export async function GET(
   req: NextRequest,
@@ -16,10 +16,9 @@ export async function GET(
   const limit = Number.isInteger(limitParam) && limitParam > 0 ? limitParam : 20;
 
   try {
-    const [matches, heroStats] = await Promise.all([
-      getRecentMatches(accountId, limit),
-      getHeroStats(accountId),
-    ]);
+    const matches = await getRecentMatches(accountId, limit);
+    const { turbo } = computeTrendMetrics(accountId, matches);
+    const heroStats = await getRecentHeroStats(accountId, HERO_WINDOW_DAYS, turbo).catch(() => []);
     const trends = computeTrendMetrics(accountId, matches, heroStats);
     return NextResponse.json(trends);
   } catch (err) {

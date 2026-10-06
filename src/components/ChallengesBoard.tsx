@@ -11,6 +11,7 @@ import { SectionHeading } from "./PageHeader";
 import { inputField, primaryButton, secondaryButton } from "./buttonStyles";
 import type { TrendMatchSummary } from "@/lib/types";
 import { pluralRu } from "@/lib/format";
+import { comparableGames, kindOfSummary } from "@/lib/metrics/gameContext";
 
 const MATCH_LIMIT = 20;
 
@@ -186,14 +187,18 @@ function AccountChallenges({ accountId, onChangeAccount }: { accountId: number; 
   const active = challenges.filter((c) => c.status === "active");
   const completed = challenges.filter((c) => c.status === "completed");
   const activeTypes = new Set(active.map((c) => c.type));
-  const candidates = generateCandidates(matches).filter((c) => !activeTypes.has(c.type));
+  // Goals and the form strip come from one kind of game: Turbo's doubled
+  // income would skew every average and target.
+  const sample = comparableGames(matches, kindOfSummary);
+  const candidates = generateCandidates(sample.games, sample.turbo).filter((c) => !activeTypes.has(c.type));
+  const skipped = sample.excludedOtherMode + sample.excludedLeft;
 
   return (
     <div className="space-y-10">
       <section>
         <SectionHeading
           title="Твоя форма"
-          note={`По ${matches.length} ${pluralRu(matches.length, ["последней игре", "последним играм", "последним играм"])} - от этих цифр считаются цели.`}
+          note={`По ${sample.games.length} ${pluralRu(sample.games.length, ["последней игре", "последним играм", "последним играм"])}${sample.turbo ? " в Turbo" : ""} - от этих цифр считаются цели.${skipped > 0 ? ` Не учтено: ${skipped} ${pluralRu(skipped, ["игра", "игры", "игр"])} (${sample.turbo ? "не Turbo" : "Turbo и особые режимы"} или игры, которые ты покинул).` : ""}`}
           right={
             onChangeAccount && (
               <button type="button" onClick={onChangeAccount} className="text-sm text-ink-muted hover:text-accent transition">
@@ -202,7 +207,7 @@ function AccountChallenges({ accountId, onChangeAccount }: { accountId: number; 
             )
           }
         />
-        <FormStrip matches={matches} />
+        {sample.games.length > 0 && <FormStrip matches={sample.games} />}
       </section>
 
       {challenges.length > 0 && (

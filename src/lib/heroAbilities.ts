@@ -43,7 +43,9 @@ function fillDescription(template: string, attrib: AbilityAttrib[]): string | nu
   });
   if (missing) return null;
   return filled
-    .replace(/%%/g, "%")
+    // "%%" is Valve's escaped percent sign; a value that already carries its
+    // own "%" before it made "100%%".
+    .replace(/%{2,}/g, "%")
     .replace(/<br\s*\/?>/gi, " ")
     .replace(/<[^>]+>/g, "")
     .replace(/\s+/g, " ")

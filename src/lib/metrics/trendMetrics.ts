@@ -1,20 +1,21 @@
 import { getHeroName } from "../constants";
+import { comparableGames, isAnalysableMode, kindOfMatch, leftTheGame } from "./gameContext";
+import { wilsonScoreLowerBound, wilsonScoreUpperBound } from "./statistics";
 import type {
   OpenDotaHeroStat,
   OpenDotaRecentMatch,
+  TrendHero,
   TrendMatchSummary,
   TrendMetrics,
+  TrendSplit,
 } from "../types";
 
-const LANE_ROLE_NAMES: Record<number, string> = {
-  1: "Сейфлейн",
-  2: "Мид",
-  3: "Оффлейн",
-  4: "Лес",
-};
-
-const MIN_GAMES_FOR_HERO_RANKING = 3;
-const HERO_LIST_SIZE = 5;
+// Below this a hero's win rate is mostly luck - 3-0 says nothing.
+const MIN_GAMES_FOR_HERO_RANKING = 5;
+const HERO_LIST_SIZE = 3;
+// A wins/losses comparison needs a few of each to show a habit, not one game.
+const MIN_GAMES_PER_SPLIT = 3;
+export const HERO_WINDOW_DAYS = 90;
 
 export function isWin(match: OpenDotaRecentMatch): boolean {
   const isRadiant = match.player_slot < 128;
@@ -34,6 +35,8 @@ export function toMatchSummary(m: OpenDotaRecentMatch): TrendMatchSummary {
     assists: m.assists,
     gpm: m.gold_per_min ?? null,
     xpm: m.xp_per_min ?? null,
+    gameMode: m.game_mode,
+    leftGame: leftTheGame(m.leaver_status),
   };
 }
 
@@ -48,7 +51,8 @@ export function selectNotableMatches(
   avgKda: number,
   count: number
 ): TrendMatchSummary[] {
-  const scored = matches.map((m) => {
+  // A game the player left, or a 1v1/event game, has nothing to review.
+  const scored = matches.filter((m) => !m.leftGame && isAnalysableMode(m.gameMode)).map((m) => {
     const kda = m.deaths === 0 ? m.kills + m.assists : (m.kills + m.assists) / m.deaths;
     const score =
       (m.win ? 0 : 3) + // losses are the most useful to analyze
@@ -64,82 +68,97 @@ export function selectNotableMatches(
     .sort((a, b) => b.startTime - a.startTime);
 }
 
+function average(values: number[]): number | null {
+  return values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : null;
+}
+
+function round1(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+function split(games: OpenDotaRecentMatch[]): TrendSplit {
+  const gpm = average(games.map((m) => m.gold_per_min).filter((v): v is number => v !== undefined));
+  const lhPerMin = average(
+    games.filter((m) => typeof m.last_hits === "number" && m.duration > 0).map((m) => m.last_hits / (m.duration / 60))
+  );
+  return {
+    games: games.length,
+    avgKills: round1(average(games.map((m) => m.kills)) ?? 0),
+    avgDeaths: round1(average(games.map((m) => m.deaths)) ?? 0),
+    avgAssists: round1(average(games.map((m) => m.assists)) ?? 0),
+    avgGpm: gpm !== null ? Math.round(gpm) : null,
+    avgLastHitsPerMin: lhPerMin !== null ? round1(lhPerMin) : null,
+  };
+}
+
+function rankHeroes(heroStats: OpenDotaHeroStat[]): { top: TrendHero[]; worst: TrendHero[] } {
+  const heroes = heroStats
+    .filter((h) => h.games >= MIN_GAMES_FOR_HERO_RANKING)
+    .map((h) => ({
+      hero: { heroId: h.hero_id, heroName: getHeroName(h.hero_id), games: h.games, winRate: h.win / h.games },
+      lower: wilsonScoreLowerBound(h.win, h.games),
+      upper: wilsonScoreUpperBound(h.win, h.games),
+    }));
+  // "Best" must win more than it loses and "worst" lose more than it wins:
+  // otherwise a 50% hero lands on both lists just for being the only one.
+  const top = heroes
+    .filter((h) => h.hero.winRate > 0.5)
+    .sort((a, b) => b.lower - a.lower)
+    .slice(0, HERO_LIST_SIZE)
+    .map((h) => h.hero);
+  const worst = heroes
+    .filter((h) => h.hero.winRate < 0.5)
+    .sort((a, b) => a.upper - b.upper)
+    .slice(0, HERO_LIST_SIZE)
+    .map((h) => h.hero);
+  return { top, worst };
+}
+
+/**
+ * Averages over comparable recent games only (one kind of game, none the
+ * player left), the wins-vs-losses split, and hero results ranked with their
+ * sample size in mind. `heroStats` should be recent (see getRecentHeroStats);
+ * pass none when the hero lists aren't needed.
+ */
 export function computeTrendMetrics(
   accountId: number,
   matches: OpenDotaRecentMatch[],
-  heroStats: OpenDotaHeroStat[]
+  heroStats: OpenDotaHeroStat[] = []
 ): TrendMetrics {
-  // OpenDota returns newest-first; reverse to chronological order for trend charts.
-  const chronological = [...matches].reverse();
-
-  const sampleSize = matches.length;
-  const wins = matches.filter(isWin).length;
-  const totalKills = matches.reduce((s, m) => s + m.kills, 0);
-  const totalDeaths = matches.reduce((s, m) => s + m.deaths, 0);
-  const totalAssists = matches.reduce((s, m) => s + m.assists, 0);
+  const sample = comparableGames(matches, kindOfMatch);
+  const games = sample.games;
+  const sampleSize = games.length;
+  const wins = games.filter(isWin);
+  const losses = games.filter((m) => !isWin(m));
+  const totalKills = games.reduce((s, m) => s + m.kills, 0);
+  const totalDeaths = games.reduce((s, m) => s + m.deaths, 0);
+  const totalAssists = games.reduce((s, m) => s + m.assists, 0);
 
   // OpenDota's match-list endpoint doesn't always include gold_per_min/
   // xp_per_min - average only over matches that actually have it, and
   // report null (never a fabricated 0) when none do.
-  const gpmSamples = matches
-    .map((m) => m.gold_per_min)
-    .filter((v): v is number => v !== undefined);
-  const xpmSamples = matches
-    .map((m) => m.xp_per_min)
-    .filter((v): v is number => v !== undefined);
-  const avgGpm =
-    gpmSamples.length > 0
-      ? gpmSamples.reduce((s, v) => s + v, 0) / gpmSamples.length
-      : null;
-  const avgXpm =
-    xpmSamples.length > 0
-      ? xpmSamples.reduce((s, v) => s + v, 0) / xpmSamples.length
-      : null;
-  const avgDeaths = sampleSize > 0 ? totalDeaths / sampleSize : 0;
-  const avgKda =
-    totalDeaths === 0 ? totalKills + totalAssists : (totalKills + totalAssists) / totalDeaths;
-
-  const roleDistribution: Record<string, number> = {};
-  for (const m of matches) {
-    if (!m.lane_role) continue;
-    const name = LANE_ROLE_NAMES[m.lane_role] ?? "Неизвестно";
-    roleDistribution[name] = (roleDistribution[name] ?? 0) + 1;
-  }
-
-  const rankedHeroes = heroStats
-    .filter((h) => h.games >= MIN_GAMES_FOR_HERO_RANKING)
-    .map((h) => ({
-      heroId: h.hero_id,
-      heroName: getHeroName(h.hero_id),
-      games: h.games,
-      winRate: h.games > 0 ? h.win / h.games : 0,
-    }));
-
-  const topHeroes = [...rankedHeroes]
-    .sort((a, b) => b.winRate - a.winRate)
-    .slice(0, HERO_LIST_SIZE);
-  const worstHeroes = [...rankedHeroes]
-    .sort((a, b) => a.winRate - b.winRate)
-    .slice(0, HERO_LIST_SIZE);
+  const avgGpm = average(games.map((m) => m.gold_per_min).filter((v): v is number => v !== undefined));
+  const avgXpm = average(games.map((m) => m.xp_per_min).filter((v): v is number => v !== undefined));
+  const avgKda = totalDeaths === 0 ? totalKills + totalAssists : (totalKills + totalAssists) / totalDeaths;
+  const { top, worst } = rankHeroes(heroStats);
 
   return {
     accountId,
     sampleSize,
-    winRate: sampleSize > 0 ? wins / sampleSize : 0,
+    turbo: sample.turbo,
+    excludedGames: sample.excludedOtherMode + sample.excludedLeft,
+    winRate: sampleSize > 0 ? wins.length / sampleSize : 0,
     avgKda: Math.round(avgKda * 100) / 100,
     avgGpm: avgGpm !== null ? Math.round(avgGpm) : null,
     avgXpm: avgXpm !== null ? Math.round(avgXpm) : null,
-    avgDeaths: Math.round(avgDeaths * 100) / 100,
-    gpmTrend: chronological
-      .map((m, i) => ({ match: i + 1, value: m.gold_per_min }))
-      .filter((p): p is { match: number; value: number } => p.value !== undefined),
-    xpmTrend: chronological
-      .map((m, i) => ({ match: i + 1, value: m.xp_per_min }))
-      .filter((p): p is { match: number; value: number } => p.value !== undefined),
-    deathsTrend: chronological.map((m, i) => ({ match: i + 1, value: m.deaths })),
-    roleDistribution,
-    topHeroes,
-    worstHeroes,
-    recentMatches: chronological.map(toMatchSummary).reverse(), // newest-first for the match list display
+    avgDeaths: sampleSize > 0 ? Math.round((totalDeaths / sampleSize) * 100) / 100 : 0,
+    winsVsLosses:
+      wins.length >= MIN_GAMES_PER_SPLIT && losses.length >= MIN_GAMES_PER_SPLIT
+        ? { wins: split(wins), losses: split(losses) }
+        : null,
+    heroWindowDays: HERO_WINDOW_DAYS,
+    topHeroes: top,
+    worstHeroes: worst,
+    recentMatches: matches.map(toMatchSummary), // newest-first, every game, for the match lists
   };
 }

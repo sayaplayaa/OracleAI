@@ -1,5 +1,6 @@
 import type { TrendMatchSummary } from "./types";
 import { pluralRu } from "./format";
+import { inFamily } from "./metrics/gameContext";
 
 export type ChallengeType = "death_control" | "kda_breakout" | "signature_hero_farm";
 
@@ -14,6 +15,9 @@ export interface ChallengeCandidate {
   baseline?: number;
   heroId?: number;
   heroName?: string;
+  /** Set from Turbo games, and only Turbo games count toward it. Missing
+   * (older challenges) = normal games. */
+  turbo?: boolean;
 }
 
 export interface StoredChallenge extends ChallengeCandidate {
@@ -47,6 +51,11 @@ function formatNumber(value: number, minDigits: number, maxDigits: number): stri
 
 /** The challenge text the player sees, in Russian. */
 export function describeChallenge(c: ChallengeCandidate): string {
+  const text = describeGoal(c);
+  return c.turbo ? `${text} - в Turbo` : text;
+}
+
+function describeGoal(c: ChallengeCandidate): string {
   const baseline =
     typeof c.baseline === "number" && Number.isFinite(c.baseline) ? c.baseline : null;
   switch (c.type) {
@@ -81,10 +90,12 @@ export function describeChallenge(c: ChallengeCandidate): string {
 /**
  * Deterministic, rule-based suggestions from the player's own real recent
  * matches - no AI involved, since these are precise numeric thresholds
- * where a model could plausibly invent a slightly-wrong number.
+ * where a model could plausibly invent a slightly-wrong number. `matches`
+ * must be comparable games (all Turbo or all normal - see comparableGames).
  */
-export function generateCandidates(matches: TrendMatchSummary[]): ChallengeCandidate[] {
+export function generateCandidates(matches: TrendMatchSummary[], turbo: boolean): ChallengeCandidate[] {
   if (matches.length < MIN_SAMPLE) return [];
+  const family = turbo ? { turbo: true } : {};
   const candidates: ChallengeCandidate[] = [];
 
   const avgDeaths = matches.reduce((s, m) => s + m.deaths, 0) / matches.length;
@@ -94,6 +105,7 @@ export function generateCandidates(matches: TrendMatchSummary[]): ChallengeCandi
       type: "death_control",
       target,
       baseline: avgDeaths,
+      ...family,
     });
   }
 
@@ -103,6 +115,7 @@ export function generateCandidates(matches: TrendMatchSummary[]): ChallengeCandi
     type: "kda_breakout",
     target: kdaTarget,
     baseline: avgKda,
+    ...family,
   });
 
   const heroCounts = new Map<number, number>();
@@ -122,6 +135,7 @@ export function generateCandidates(matches: TrendMatchSummary[]): ChallengeCandi
         baseline: avgGpm,
         heroId: topHeroId,
         heroName: heroMatches[0].heroName,
+        ...family,
       });
     }
   }
@@ -151,8 +165,11 @@ export function evaluateChallenge(
   challenge: StoredChallenge,
   matches: TrendMatchSummary[]
 ): EvaluationResult {
+  // Only the kind of game the target was set from: a Turbo game's doubled
+  // GPM would "complete" a normal-game farm goal without any improvement.
   const qualifying = matches
     .filter((m) => m.startTime * 1000 > challenge.createdAt)
+    .filter((m) => inFamily(m.gameMode, Boolean(challenge.turbo)) && !m.leftGame)
     .sort((a, b) => a.startTime - b.startTime);
 
   const winner = qualifying.find((m) => meetsChallenge(challenge, m));

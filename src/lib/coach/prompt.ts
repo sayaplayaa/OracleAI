@@ -1,6 +1,9 @@
+import { pluralRu } from "../format";
 import type {
+  CoachFinding,
   CrossMatchPatterns,
   DraftInsights,
+  LaneTally,
   HeroAbility,
   HeroRoleOverview,
   MatchStory,
@@ -49,48 +52,142 @@ export const SYSTEM_PROMPT = `Ты - опытный тренер по Dota 2, к
 
 ${COACHING_VOCABULARY}`;
 
-function formatLaneTally(tally: { ahead: number; behind: number; tied: number; sampledGames: number }): string {
-  if (tally.sampledGames === 0) return "в выбранных играх нет реальных данных о сопернике по линии";
-  return `впереди в ${tally.ahead}, позади в ${tally.behind}, наравне в ${tally.tied} из ${tally.sampledGames} игр с реальными данными о сопернике по линии`;
+const POSITION_NAMES: Record<number, string> = {
+  1: "керри (поз. 1)",
+  2: "мид (поз. 2)",
+  3: "оффлейн (поз. 3)",
+  4: "саппорт (поз. 4)",
+  5: "хард-саппорт (поз. 5)",
+};
+
+function num(value: number, digits = 1): string {
+  return value.toLocaleString("ru-RU", { maximumFractionDigits: digits });
 }
 
-export function buildTrendCoachPrompt(
-  metrics: TrendMetrics,
-  patterns: CrossMatchPatterns
-): string {
-  const hasPatternData = patterns.parsedGamesSampled > 0;
+function share(part: number, whole: number): string {
+  return whole > 0 ? `${Math.round((part / whole) * 100)}%` : "0%";
+}
 
-  return `Вот обобщённые данные по последним ${metrics.sampleSize} матчам этого игрока. Составь отчёт тренера на русском языке через инструмент submit_coaching_report, сосредоточившись на повторяющихся закономерностях, а не на одной игре - на том, что раз за разом происходит в его реальных матчах.
+function games(count: number): string {
+  return `${count} ${pluralRu(count, ["игра", "игры", "игр"])}`;
+}
 
+// "из 3 игр", "из 1 игры".
+function ofGames(count: number): string {
+  return `из ${count} ${pluralRu(count, ["игры", "игр", "игр"])}`;
+}
+
+// "в 2 играх", "в 1 игре".
+function inGames(count: number): string {
+  return `в ${count} ${pluralRu(count, ["игре", "играх", "играх"])}`;
+}
+
+function laneTally(t: LaneTally): string {
+  return `впереди в ${t.ahead}, позади в ${t.behind}, наравне в ${t.tied} ${ofGames(t.sampledGames)}`;
+}
+
+function patternLines(p: CrossMatchPatterns): string[] {
+  if (p.parsedGamesSampled === 0) {
+    return ["Разобранных игр нет - не придумывай закономерностей про смерти, линию и убийц."];
+  }
+  const lines = [`Закономерности ${ofGames(p.parsedGamesSampled)}, полностью разобранных OpenDota (неразобранные сюда не попали):`];
+  const positions = Object.entries(p.positions)
+    .sort((a, b) => b[1] - a[1])
+    .map(([pos, n]) => `${POSITION_NAMES[Number(pos)] ?? `поз. ${pos}`} - ${games(n)}`);
+  if (positions.length > 0) lines.push(`- позиции: ${positions.join(", ")}`);
+  const d = p.deaths;
+  lines.push(
+    `- смерти: всего ${d.total}; до ${p.laneEndLabel} - ${d.beforeLaneEnd} (${share(d.beforeLaneEnd, d.total)}); вне драк, в одиночку - ${d.outsideFights} (${share(d.outsideFights, d.total)}); в ${d.gamesWithRoughLane} ${ofGames(p.parsedGamesSampled)} - 2+ смерти до ${p.laneEndLabel}`
+  );
+  if (p.recurringKillers.length > 0) {
+    lines.push(
+      `- герои, убивавшие игрока в нескольких разных играх: ${p.recurringKillers.map((k) => `${k.killerHeroName} - ${k.deaths} ${pluralRu(k.deaths, ["смерть", "смерти", "смертей"])} ${inGames(k.games)}`).join("; ")}`
+    );
+  }
+  if (p.laneNetWorth.sampledGames > 0) {
+    lines.push(`- нетворс на ${p.laneEndLabel} против врага на той же позиции: ${laneTally(p.laneNetWorth)}`);
+  }
+  if (p.laneLastHits.sampledGames > 0) {
+    lines.push(`- добивания на ${p.laneEndLabel} против врага на той же позиции (только кор-позиции): ${laneTally(p.laneLastHits)}`);
+  }
+  return lines;
+}
+
+function splitLines(m: TrendMetrics): string[] {
+  const s = m.winsVsLosses;
+  if (!s) return ["Побед или поражений меньше трёх - сравнения побед с поражениями нет."];
+  const { wins: w, losses: l } = s;
+  const lines = [
+    `Победы (${w.games}) против поражений (${l.games}) - что меняется, когда игрок проигрывает:`,
+    `- смертей за игру: ${num(w.avgDeaths)} в победах против ${num(l.avgDeaths)} в поражениях`,
+    `- убийств за игру: ${num(w.avgKills)} против ${num(l.avgKills)}; помощи: ${num(w.avgAssists)} против ${num(l.avgAssists)}`,
+  ];
+  if (w.avgGpm !== null && l.avgGpm !== null) lines.push(`- золота в минуту: ${w.avgGpm} в победах против ${l.avgGpm} в поражениях`);
+  if (w.avgLastHitsPerMin !== null && l.avgLastHitsPerMin !== null) {
+    lines.push(`- добиваний в минуту: ${num(w.avgLastHitsPerMin)} против ${num(l.avgLastHitsPerMin)}`);
+  }
+  return lines;
+}
+
+function heroLines(m: TrendMetrics): string[] {
+  const hero = (h: TrendMetrics["topHeroes"][number]) => `${h.heroName} - ${games(h.games)}, ${Math.round(h.winRate * 100)}% побед`;
+  if (m.topHeroes.length === 0 && m.worstHeroes.length === 0) {
+    return [`Ни на одном герое нет 5+ игр за последние ${m.heroWindowDays} дней - не делай выводов о героях.`];
+  }
+  const lines = [
+    `Герои за последние ${m.heroWindowDays} дней (только с 5+ играми; порядок учитывает размер выборки, а не только процент побед):`,
+  ];
+  if (m.topHeroes.length > 0) lines.push(`- лучше всего: ${m.topHeroes.map(hero).join("; ")}`);
+  if (m.worstHeroes.length > 0) lines.push(`- хуже всего: ${m.worstHeroes.map(hero).join("; ")}`);
+  return lines;
+}
+
+/** The trend report's data, as lines with numbers written the way the report should quote them. */
+export function buildTrendData(metrics: TrendMetrics, patterns: CrossMatchPatterns): string {
+  const wins = Math.round(metrics.winRate * metrics.sampleSize);
+  const kind = metrics.turbo ? "Turbo-игр" : "обычных игр";
+  const rates = [
+    metrics.avgGpm !== null ? `золота в минуту ${metrics.avgGpm}` : null,
+    metrics.avgXpm !== null ? `опыта в минуту ${metrics.avgXpm}` : null,
+  ].filter(Boolean);
+  return [
+    `Выборка: последние ${metrics.sampleSize} ${kind} игрока${
+      metrics.excludedGames > 0
+        ? ` (ещё ${games(metrics.excludedGames)} не учтено: ${metrics.turbo ? "не Turbo" : "Turbo и особые режимы"} или игры, которые игрок покинул, - их цифры несравнимы)`
+        : ""
+    }.`,
+    `Винрейт: ${Math.round(metrics.winRate * 100)}% (${wins} ${pluralRu(wins, ["победа", "победы", "побед"])}, ${metrics.sampleSize - wins} ${pluralRu(metrics.sampleSize - wins, ["поражение", "поражения", "поражений"])}).`,
+    `В среднем за игру: смертей ${num(metrics.avgDeaths)}, KDA ${num(metrics.avgKda)}${rates.length > 0 ? `, ${rates.join(", ")}` : ""}.`,
+    "",
+    ...splitLines(metrics),
+    "",
+    ...heroLines(metrics),
+    "",
+    ...patternLines(patterns),
+  ].join("\n");
+}
+
+export function buildTrendCoachPrompt(data: string, priorities: CoachFinding[]): string {
+  return `Вот данные по последним играм этого игрока. Составь отчёт тренера на русском языке через инструмент submit_coaching_report - о том, что ПОВТОРЯЕТСЯ из игры в игру, а не об одной игре.
+
+${data}
 ${
-  hasPatternData
-    ? `Реальные закономерности, найденные в последних ${patterns.parsedGamesSampled} полностью разобранных матчах этого игрока (ничего не угадано - неразобранные OpenDota матчи сюда просто не попадают):
-- Повторяющиеся убийцы: герои, которые убивали этого игрока больше одного раза, начиная с самого частого: ${patterns.recurringKillers.length > 0 ? JSON.stringify(patterns.recurringKillers) : "повторов нет"}. Герой, встречающийся 3+ раза, - реальная закономерность, которую стоит назвать, а не совпадение.
-- Добивания на 10-й минуте против реального соперника по линии: ${formatLaneTally(patterns.laneLastHits)}.
-- Золото на 10-й минуте против реального соперника по линии: ${formatLaneTally(patterns.laneGold)}.
-
-ОБЯЗАТЕЛЬНО: хотя бы одна сильная сторона или слабость и хотя бы один совет ДОЛЖНЫ быть построены на этих данных, с точными числами (например: «тебя 7 раз убил Snapfire в последних 3 разобранных матчах» или «ты был впереди по золоту на линии во всех 3 играх»). Пиши это в поле "metric" коротко и по-русски (например: «Snapfire 7 раз, Legion Commander 6 раз, Juggernaut 5 раз») - никогда не вставляй сырой JSON-массив. Это реальная личная повторяющаяся закономерность, и она важнее общей статистики ниже, которую можно использовать для остального отчёта, но она не должна вытеснять эти находки.
-
+  priorities.length > 0
+    ? `
+Главные повторяющиеся проблемы (уже проверены, по важности):
+${priorities.map((p, i) => `${i + 1}. ${p.metric}`).join("\n")}
 `
-    : `Данных о закономерностях нет (ни один из последних матчей ещё не разобран OpenDota полностью) - строй отчёт только на общей статистике ниже и не придумывай повторяющихся закономерностей, которых нет в данных.
-
-`
-}Общая статистика по выборке (без списка отдельных матчей - этот отчёт о том, что повторяется, поэтому не выдавай киллы/смерти одной игры за закономерность, если это не подтверждено данными выше):
-${JSON.stringify(
-  {
-    sampleSize: metrics.sampleSize,
-    winRate: metrics.winRate,
-    avgKda: metrics.avgKda,
-    avgGpm: metrics.avgGpm,
-    avgXpm: metrics.avgXpm,
-    avgDeaths: metrics.avgDeaths,
-    roleDistribution: metrics.roleDistribution,
-    topHeroes: metrics.topHeroes,
-    worstHeroes: metrics.worstHeroes,
-  },
-  null,
-  2
-)}`;
+    : ""
+}
+Правила:
+- Обращайся к игроку на «ты» («ты умираешь», «твои победы»), не «игрок» и не «вы».
+- В поле "metric" каждого пункта - точные числа из данных выше, коротко и по-русски (например: «смертей за игру: N в победах против M в поражениях», где N и M - числа из данных). Не выдумывай чисел и не пересчитывай их.
+- "summary": 2-3 предложения о главной повторяющейся проблеме и о том, что отличает твои победы от поражений.
+- "weaknesses": начни с главных проблем выше, если они есть.
+- "strengths": только то, что у игрока стабильно хорошо (например, мало смертей до конца линии, герои из списка «лучше всего»). Разница между победами и поражениями - не сильная сторона.
+- Не делай выводов о героях, которых нет в списке героев, и не называй героя лучшим по одной-двум играм.
+- Золото и опыт в минуту зависят от роли: не сравнивай их с «нормой» и не ругай саппорта за низкий фарм.
+- Совет - конкретная привычка на следующие игры, связанная с найденной закономерностью (что делать иначе), а не «играй аккуратнее».`;
 }
 
 export function buildMatchStoryCoachPrompt(

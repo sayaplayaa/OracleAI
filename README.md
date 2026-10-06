@@ -64,7 +64,9 @@ The UI is built around four steps, in Russian, with nothing else on screen:
    OpenID 2.0, verified server-side against Steam - no Steam Web API key
    needed).
 2. **Home signed in** - the player's own last 20 games (hero, win/loss, KDA,
-   duration); a game whose analysis is already saved on this device is marked
+   duration), Turbo included and marked as such (OpenDota's default filter
+   hides Turbo, which showed Turbo players weeks-old games as their "last
+   games"); a game whose analysis is already saved on this device is marked
    "Разбор готов".
 3. **Pick a game -> `/analysis/[matchId]`** - the AI analysis of that game
    starts immediately (no button): the same grounded match analysis as
@@ -76,6 +78,55 @@ The UI is built around four steps, in Russian, with nothing else on screen:
    for 6 h, and `localStorage` on the device) so reopening a game is instant.
 4. **Подробная статистика** - a button on the analysis page that opens the
    full data view of that match (`/player/[accountId]/match/[matchId]`).
+
+What the single-game analysis takes into account, all worked out in code
+before the model writes a word:
+
+- **Game context, said first.** Turbo (its own phase windows - laning to
+  7:00, mid game to 16:00 - and no comparison with normal-game percentiles
+  or meta item timings, which every Turbo game would "beat"); players who
+  left, with the time, from the replay's connection log: a teammate leaving
+  is named as what decided the game, a counterpart leaving ends the
+  comparison with them, and a player who left themselves is analysed only up
+  to that moment (later deaths on the map were their teammates' doing).
+- **Fair asks only.** No "push buildings" or "get late kills" while the team
+  is far behind or a player down - those phases are labelled as defence, and
+  the model is told to advise on defending. A late game under 5 minutes is
+  folded into the mid game instead of being judged on two minutes.
+- **Strengths that mean something.** An edge over the counterpart counts
+  only past a real margin (4 deaths against 5 isn't one), phase wins are one
+  line instead of three, kills/assists/kill share count once, and real
+  habits are credited: being in nearly every fight, kill participation, and
+  for supports Observer Wards the enemy never found.
+- **A measurable goal per priority** - "не больше 1 смерти до 10:00 (в этой
+  игре - 3)", "9 уровень к 10:00 - как у Lion (у тебя был 8)" - from the
+  game's own numbers, so the next game can be checked against it. Also new:
+  level-6 timing against the counterpart, and Observer Wards the enemy
+  removed (support).
+- **The whole game, not just one opponent.** A "Как решилась игра" card
+  classifies the game from the team gold curve - a thrown lead, a comeback, a
+  stomp, a close game - and lists the fights that decided it: where they
+  happened, what each side lost, the lead before and after, a fresh Aegis,
+  and what the player did in each (died first, died seconds before it, was
+  dead, stayed out). In a thrown game the priorities lead with how the lead
+  was lost - no buildings taken after the peak, fights lost on the enemy
+  half while ahead, Aegis spent on a chase, no buyback as the base fell -
+  instead of the lane.
+- **Behaviour and positioning.** Deaths just before a fight and first deaths
+  in lost fights are found for every game. When STRATZ has the replay's
+  movement data, the report also checks who stood closest to the enemy as
+  each fight began (wrong for a carry, mid or support; the job of position
+  3), how far the nearest ally was at each death outside a fight, and where
+  the player was during the fights they missed.
+- **Checked narration.** Besides the existing number/time/item checks, any
+  sentence that contradicts a phase verdict ("ты проиграл лейтгейм" for a won
+  one, or for a phase that was folded away) or the result of the game, or
+  miscounts deaths before a time ("2 раза до 5:00" with one), is dropped.
+  English names keep no Russian case endings ("Huskarу" -> "Huskar").
+- **Coaching rules from real material.** Each problem carries a rule distilled
+  from public coaching guides, with the mechanics checked (buyback 200 + net
+  worth / 13, uphill misses for ranged attacks only, comeback gold) -
+  sources and the rule per problem are in `docs/coach-knowledge.md`.
 
 Everything else is in the header on every page: Meta, Guides, Tournaments,
 Challenges, Riddles, the full player profile and the search bar
@@ -123,8 +174,17 @@ row also has a **Разбор** button straight into `/analysis/[matchId]`.
 - **Matches worth reviewing** - a curated 10 out of your last 20 games:
   losses weighted highest, then games where KDA/deaths were notably off your
   own average - not just "most recent."
-- **Get AI Trend Report** - sends the last 20 games' aggregated stats to the
-  local model for a pattern-level report.
+- **Get AI Trend Report** - a pattern-level report over your recent games,
+  built only from games that can be compared: your main kind of game (Turbo
+  or normal - their numbers never mix) minus games you left, and at least 5
+  of them. It gets what changes between your wins and your losses (deaths,
+  kills, GPM, last hits per minute - the most direct pointer at what loses
+  you games), your heroes over the last 90 days with 5+ games, ranked by a
+  Wilson bound rather than raw win rate (3-0 on a hero from years ago no
+  longer tops the list), and, from your parsed games: deaths before the end
+  of laning and outside fights, heroes that killed you in several different
+  games, and lane results against the enemy on your own position. Findings
+  whose numbers aren't in that data are dropped.
 
 **Match History** tab: the full match list with a wins/losses filter,
 paginated ("Load more").
@@ -192,7 +252,10 @@ win rate, games, main role) and four tabs:
 - **Build** - role picker (win rate and share of games per position), then
   the real STRATZ current-week build for that position: starting items, core
   items in order with average timings, talents (most picked / highest win
-  rate), situational items and neutral items by tier.
+  rate), situational items and neutral items by tier. Talents read as the
+  Russian client shows them, with their real numbers ("+200 к радиусу Mana
+  Void") from Valve's ability files - `dotaconstants` has no hero-talent
+  values, and 70% of talents used to show "+?".
 - **Abilities** - every real ability (name, official description, numeric
   attributes, icon), straight from `dotaconstants`' game-client data.
 - **Matchups** - toughest and easiest opponents (OpenDota) and best lane
@@ -220,7 +283,9 @@ Real competitive Dota, not personal stats:
 
 ### Challenges (`/challenges`)
 
-Training goals generated from your own real recent games (last 20), not
+Training goals generated from your own real recent games (last 20, of your
+main kind - Turbo or normal; a Turbo game never completes a goal set from
+normal games, or the other way round), not
 canned suggestions - e.g. "finish a game with fewer than N deaths" or "hit
 N GPM on {your most-played hero}," with N computed from your own recent
 average. Deliberately rule-based rather than AI-generated, since these are
@@ -253,6 +318,18 @@ strength/weakness/tip cites one of those fields.
 
 - No database - everything is fetched live per request, with a short
   in-memory cache (per server process, not persisted or shared).
+- **Turbo phase windows are an estimate** (laning to 7:00, mid game to
+  16:00, from Turbo's roughly doubled income and ~20-minute games) - there's
+  no official Turbo laning length. Turbo games are only ever compared with
+  the counterpart in the same game.
+- **Fight positioning needs STRATZ's movement data**, which STRATZ has for
+  most games within a day but not all; without it the report still finds
+  deaths before and first in fights (from OpenDota), just not who stood
+  where. OpenDota's teamfights don't record each player's death order within
+  a fight, so "died first" compares death times from the replay's death log.
+- **Leave times** come from the replay's connection log (the last disconnect
+  without a reconnect); a player marked as having left whose replay has no
+  such entry is still named, but the analysis can't cut at an exact time.
 - **MMR is an estimate, twice over**: OpenDota's `computed_mmr` is itself
   OpenDota's own estimate (not Valve's official number, which no public API
   exposes), and the rank-tier ladder used to compute "MMR to next rank" is

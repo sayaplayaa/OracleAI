@@ -37,6 +37,7 @@ export function AnalysisPreview() {
           <div className="rounded-xl bg-page/60 border border-border p-3" style={{ boxShadow: "inset 0 2px 0 0 var(--color-highlight-text)" }}>
             <p className="text-[10px] font-semibold uppercase tracking-wide text-highlight-text mb-1.5">Подтянуть</p>
             <p className="text-xs text-ink leading-snug">3 смерти вне тимфайтов - фарм без обзора</p>
+            <p className="text-[10px] text-accent leading-snug mt-1">Цель: 0 смертей вне драк</p>
           </div>
         </div>
 

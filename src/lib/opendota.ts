@@ -112,19 +112,25 @@ const MATCH_LIST_PROJECTION = [
   "match_id", "player_slot", "radiant_win", "duration", "game_mode", "lobby_type", "hero_id",
   "start_time", "kills", "deaths", "assists", "average_rank", "party_size", "gold_per_min",
   "xp_per_min", "last_hits", "hero_damage", "tower_damage", "hero_healing", "lane", "lane_role",
-  "is_roaming",
+  "is_roaming", "leaver_status",
 ]
   .map((field) => `project=${field}`)
   .join("&");
 
+// The player's real last games, Turbo included. OpenDota's default
+// ("significant") filter silently drops Turbo, so a player who mostly plays
+// Turbo saw weeks-old games under "your last games". Callers that average
+// stats pick comparable games themselves (see comparableGames).
 export function getRecentMatches(accountId: number, limit = 20, offset = 0) {
-  return cached(`matches:v2:${accountId}:${limit}:${offset}`, MINUTE, () =>
+  return cached(`matches:v3:${accountId}:${limit}:${offset}`, MINUTE, () =>
     request<OpenDotaRecentMatch[]>(
-      `/players/${accountId}/matches?limit=${limit}&offset=${offset}&${MATCH_LIST_PROJECTION}`
+      `/players/${accountId}/matches?limit=${limit}&offset=${offset}&significant=0&${MATCH_LIST_PROJECTION}`
     )
   );
 }
 
+// Standard games only (OpenDota's default filter): the hero and pro reports
+// compare against normal-game numbers, which Turbo's economy would distort.
 export function getMatchesForHero(accountId: number, heroId: number, limit = 20) {
   return cached(`matches:v2:${accountId}:hero:${heroId}:${limit}`, MINUTE, () =>
     request<OpenDotaRecentMatch[]>(
@@ -136,6 +142,17 @@ export function getMatchesForHero(accountId: number, heroId: number, limit = 20)
 export function getHeroStats(accountId: number) {
   return cached(`heroes:${accountId}`, MINUTE, () =>
     request<OpenDotaHeroStat[]>(`/players/${accountId}/heroes`)
+  );
+}
+
+// Per-hero results over the last `days` days: big enough samples to rank
+// heroes, unlike the last 20 games, and current, unlike the lifetime totals
+// (which rank a hero last played years ago at 3-0 first). Normal games by
+// default; `turbo` asks for Turbo games only.
+export function getRecentHeroStats(accountId: number, days = 90, turbo = false) {
+  const mode = turbo ? "&game_mode=23&significant=0" : "";
+  return cached(`heroes:${accountId}:${days}d${turbo ? ":turbo" : ""}`, 10 * MINUTE, () =>
+    request<OpenDotaHeroStat[]>(`/players/${accountId}/heroes?date=${days}${mode}`)
   );
 }
 

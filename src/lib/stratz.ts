@@ -190,6 +190,57 @@ export function getMatchDeathEvents(matchId: number) {
   });
 }
 
+// Where a hero was over the game: STRATZ records a point each time the hero
+// moves to a new grid cell (same ~64-192 grid as the ward logs, 1 cell = 128
+// game units), so the position at any second is the last point before it.
+export interface StratzPositionTrack {
+  heroId: number;
+  isRadiant: boolean;
+  points: { time: number; x: number; y: number }[];
+}
+
+/**
+ * Every hero's movement over the match - the only source of where players
+ * stood in fights and who was near them when they died. Best-effort: throws
+ * when STRATZ hasn't parsed the replay, so callers fall back to death
+ * positions alone.
+ */
+export function getMatchPositionTracks(matchId: number) {
+  return cached(`stratz:match-tracks:${matchId}`, 24 * HOUR, async () => {
+    const data = await graphql<{
+      match: {
+        players: {
+          heroId: number;
+          isRadiant: boolean;
+          playbackData: { playerUpdatePositionEvents: { time: number; x: number; y: number }[] | null } | null;
+        }[];
+      } | null;
+    }>(
+      `query MatchTracks($id: Long!) {
+        match(id: $id) {
+          players {
+            heroId
+            isRadiant
+            playbackData { playerUpdatePositionEvents { time x y } }
+          }
+        }
+      }`,
+      { id: matchId }
+    );
+    const players = data.match?.players ?? [];
+    if (!players.some((p) => (p.playbackData?.playerUpdatePositionEvents?.length ?? 0) > 0)) {
+      throw new StratzError(`У STRATZ нет позиций героев в матче ${matchId}`);
+    }
+    return players.map(
+      (p): StratzPositionTrack => ({
+        heroId: p.heroId,
+        isRadiant: p.isRadiant,
+        points: [...(p.playbackData?.playerUpdatePositionEvents ?? [])].sort((a, b) => a.time - b.time),
+      })
+    );
+  });
+}
+
 export interface StratzHeroPositionStat {
   heroId: number;
   position: string;

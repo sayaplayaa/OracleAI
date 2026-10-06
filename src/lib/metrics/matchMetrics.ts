@@ -8,6 +8,7 @@ import type {
   OpenDotaMatch,
 } from "../types";
 import { estimatePercentile, getMedianValue } from "./benchmarks";
+import { isTurbo } from "./gameContext";
 
 const LANE_ROLE_NAMES: Record<number, string> = {
   1: "Сейфлейн",
@@ -125,6 +126,9 @@ export function computeMatchMetrics(
 
   const durationMinutes = match.duration / 60;
   const stats: MetricPoint[] = [];
+  // OpenDota's hero benchmarks are normal-game numbers: against them, every
+  // Turbo game (roughly double the income) reads as a top-1% farm.
+  const reference = isTurbo(match.game_mode) ? null : benchmarks;
 
   const addStat = (
     label: string,
@@ -132,7 +136,7 @@ export function computeMatchMetrics(
     rawValue: number,
     unit?: string
   ) => {
-    const buckets = key ? benchmarks?.result?.[key] : undefined;
+    const buckets = key ? reference?.result?.[key] : undefined;
     const percentile = estimatePercentile(buckets, rawValue);
     const median = getMedianValue(buckets);
     stats.push({

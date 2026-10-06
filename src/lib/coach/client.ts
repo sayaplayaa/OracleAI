@@ -22,7 +22,10 @@ import {
   buildMatchStoryCoachPrompt,
   buildProComparisonPrompt,
   buildTrendCoachPrompt,
+  buildTrendData,
 } from "./prompt";
+import { keepGroundedFindings } from "./grounding";
+import { trendPriorities, trendStrengths } from "./trendFindings";
 import {
   assembleMatchReport,
   buildMatchCoachPrompt,
@@ -356,8 +359,27 @@ function dropRepeatedFindings<T>(value: T): T {
   return value;
 }
 
+// The model declines English game names by gluing Russian case endings onto
+// them ("Huskarу", "Lionа", "Blinkом") - the game never declines them - and
+// sometimes measures gold in "points" ("1404 очков нетворса").
+const GLUED_ENDING = /([A-Za-z][A-Za-z'’]*)[а-яё]{1,3}(?![\p{L}])/gu;
+const POINTS_OF_GOLD = /(\d[\d\s]*?)\s*очк\p{L}*\s+(нетворса|золота)/giu;
+
+function fixLanguage<T>(value: T): T {
+  if (typeof value === "string") {
+    return value.replace(GLUED_ENDING, "$1").replace(POINTS_OF_GOLD, "$1 золота") as unknown as T;
+  }
+  if (Array.isArray(value)) return value.map((v) => fixLanguage(v)) as unknown as T;
+  if (value && typeof value === "object") {
+    const result: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) result[k] = fixLanguage(v);
+    return result as T;
+  }
+  return value;
+}
+
 function tidy<T>(report: T): T {
-  return dropRepeatedFindings(stripMarkdownEmphasis(report));
+  return dropRepeatedFindings(fixLanguage(stripMarkdownEmphasis(report)));
 }
 
 export async function coachMatch(analysis: MatchAnalysis): Promise<CoachReport> {
@@ -376,11 +398,23 @@ export async function coachTrends(
   metrics: TrendMetrics,
   patterns: CrossMatchPatterns
 ): Promise<CoachReport> {
-  const report = await runCoach<CoachReport>(
-    buildTrendCoachPrompt(metrics, patterns),
-    coachReportTool
-  );
-  return tidy(report);
+  const data = buildTrendData(metrics, patterns);
+  const priorities = trendPriorities(metrics, patterns);
+  const report = await runCoach<CoachReport>(buildTrendCoachPrompt(data, priorities), coachReportTool);
+  // Prompt rules alone don't reliably hold on this model - a finding whose
+  // numbers aren't in the data is dropped rather than shown. What to work on
+  // comes from the verified patterns when there are any: the model's own tips
+  // were generic ("улучшите умение управлять ситуацией в боях").
+  const grounded = keepGroundedFindings(tidy(report), data);
+  const verified = trendStrengths(metrics, patterns);
+  // A wins-vs-losses gap is the difference between good and bad games, not
+  // a strength - the model kept filing it there anyway.
+  const modelStrengths = grounded.strengths.filter((f) => !/в победах|в поражениях/i.test(f.metric));
+  return {
+    ...grounded,
+    strengths: [...verified, ...modelStrengths].slice(0, 4),
+    tips: priorities.length > 0 ? priorities : grounded.tips,
+  };
 }
 
 export async function coachMatchStory(

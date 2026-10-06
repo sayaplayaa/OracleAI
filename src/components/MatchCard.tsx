@@ -2,7 +2,17 @@ import Image from "next/image";
 import Link from "next/link";
 import { getHeroImage } from "@/lib/constants";
 import { formatMatchTime, timeAgoRu } from "@/lib/format";
+import { modeTag } from "@/lib/metrics/gameContext";
 import type { TrendMatchSummary } from "@/lib/types";
+
+export function ModeChip({ tag }: { tag: string | null }) {
+  if (!tag) return null;
+  return (
+    <span className="text-[10px] font-semibold uppercase tracking-wide shrink-0 px-1.5 py-px rounded border border-border text-ink-muted">
+      {tag}
+    </span>
+  );
+}
 
 /**
  * One game in a player's list. The whole row opens the match stats; on the
@@ -37,6 +47,7 @@ export function MatchCard({
           <span className="text-[10px] font-bold uppercase tracking-wide shrink-0" style={{ color }}>
             {match.win ? "Победа" : "Поражение"}
           </span>
+          <ModeChip tag={modeTag(match.gameMode)} />
         </div>
         <div
           className="text-xs text-ink-muted font-mono tabular-nums mt-0.5 truncate"

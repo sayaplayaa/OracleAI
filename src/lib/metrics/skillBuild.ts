@@ -41,8 +41,18 @@ function levelsForSkillIndices(names: (string | null)[], maxLevel: number): numb
   return levels;
 }
 
+/** Cumulative XP needed for a hero level (official dotaconstants table). */
+export function xpForLevel(level: number): number | null {
+  return XP_THRESHOLDS[level - 1] ?? null;
+}
+
+/** Hero level reached with this much cumulative XP. */
+export function levelForXp(xp: number): number {
+  return Math.max(1, XP_THRESHOLDS.filter((threshold) => threshold <= xp).length);
+}
+
 /** Interpolates when a real xp_t series first reaches a target cumulative XP. */
-function interpolateTime(xpSeries: number[], targetXp: number): number | null {
+export function interpolateTime(xpSeries: number[], targetXp: number): number | null {
   if (xpSeries.length === 0) return null;
   if (xpSeries[0] >= targetXp) return 0;
 

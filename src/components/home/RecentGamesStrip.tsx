@@ -4,6 +4,8 @@ import { getRecentMatches } from "@/lib/opendota";
 import { getHeroImage, getHeroName } from "@/lib/constants";
 import { formatMatchTime, timeAgoRu } from "@/lib/format";
 import { AnalyzedBadge } from "../AnalyzedBadge";
+import { ModeChip } from "../MatchCard";
+import { modeTag } from "@/lib/metrics/gameContext";
 
 const SHOWN = 8;
 
@@ -70,7 +72,10 @@ export async function RecentGamesStrip({ accountId }: { accountId: number }) {
                   </span>
                 </div>
                 <div className="px-3.5 pb-3.5 -mt-3 relative">
-                  <p className="font-semibold text-sm text-ink truncate">{getHeroName(game.hero_id)}</p>
+                  <p className="font-semibold text-sm text-ink truncate flex items-center gap-2">
+                    <span className="truncate">{getHeroName(game.hero_id)}</span>
+                    <ModeChip tag={modeTag(game.game_mode)} />
+                  </p>
                   <p className="text-[11px] mt-1 flex items-center gap-1.5 text-ink-muted font-mono tabular-nums">
                     <span className="font-sans font-bold uppercase tracking-wide" style={{ color }}>
                       {won ? "Победа" : "Поражение"}

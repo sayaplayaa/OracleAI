@@ -3,10 +3,12 @@ import type {
   CoachFinding,
   CoachPhaseReport,
   CoachReport,
+  GameContext,
   PhaseId,
   PhaseVerdict,
 } from "@/lib/types";
 import { DeathVisionMap } from "./DeathVisionMap";
+import { GameFlowCard } from "./GameFlowCard";
 import { NetWorthDiffChart } from "./NetWorthDiffChart";
 
 const PHASE_TITLES: Record<PhaseId, string> = {
@@ -131,6 +133,12 @@ function ImprovementsColumn({ tips }: { tips: CoachFinding[] }) {
                   <Label accent>Как исправить</Label>
                   <p className="text-sm text-ink leading-relaxed">{tip.point}</p>
                 </div>
+                {tip.target && (
+                  <div className="rounded-lg border border-accent/30 bg-accent/8 px-3 py-2">
+                    <Label accent>Цель на следующую игру</Label>
+                    <p className="text-sm text-ink font-medium leading-snug">{tip.target}</p>
+                  </div>
+                )}
               </div>
             </li>
           ))}
@@ -227,6 +235,28 @@ function VerdictStrip({ phases, counterpart }: { phases: CoachPhaseReport[]; cou
   );
 }
 
+/** Turbo and players who left change how the whole report reads - said first. */
+export function GameContextNotice({ context }: { context?: GameContext }) {
+  if (!context || context.notes.length === 0) return null;
+  const color = context.leavers.length > 0 ? "var(--color-status-critical)" : "var(--color-highlight-text)";
+  return (
+    <section
+      className="bg-surface border border-border rounded-2xl px-5 py-4"
+      style={{ boxShadow: `inset 4px 0 0 0 ${color}` }}
+      aria-label="Особенности этой игры"
+    >
+      <Label>Особенности этой игры</Label>
+      <ul className="space-y-1.5 mt-1">
+        {context.notes.map((note) => (
+          <li key={note} className="text-sm text-ink-secondary leading-relaxed">
+            {note}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 export function StatsButton({
   accountId,
   matchId,
@@ -265,6 +295,7 @@ export function SimpleReport({
 
   return (
     <div className="space-y-10 rise-in">
+      <GameContextNotice context={report.context} />
       {phases.length === 0 && (
         <div className="bg-surface border border-border rounded-2xl p-4 text-sm text-ink-secondary leading-relaxed">
           У OpenDota нет разобранного реплея этой игры (возможно, он уже устарел), поэтому
@@ -288,6 +319,8 @@ export function SimpleReport({
         </section>
         {phases.length > 0 && <VerdictStrip phases={phases} counterpart={comparison?.counterpartHero} />}
       </div>
+
+      {report.gameFlow && <GameFlowCard flow={report.gameFlow} />}
 
       <div className="grid lg:grid-cols-2 gap-4 items-start">
         <StrengthsColumn strengths={report.strengths} />

@@ -7,6 +7,7 @@ import type {
   CoachReport,
   MatchAnalysis,
   PhaseAnalysis,
+  PhaseId,
   PhaseVerdict,
 } from "../types";
 import { GAME_PRINCIPLES, roleProfileFor } from "./roles";
@@ -27,7 +28,7 @@ export function buildMatchSystemPrompt(analysis: MatchAnalysis): string {
   const role = roleProfileFor(analysis.position);
   return `Ты - тренер по Dota 2, который разбирает один матч одного игрока так, как топовый тренер разбирает запись игры: находишь решения, из-за которых была проиграна каждая фаза, и говоришь, что делать иначе.
 
-ЯЗЫК: пиши весь отчёт только на русском языке. Названия НЕ переводи и не транслитерируй: имена героев, способностей, предметов и юнитов пиши латиницей ровно так, как они даны в фактах (Anti-Mage, Black King Bar, Arcane Orb, Roshan, Observer Ward, Sentry Ward, Smoke of Deceit, TP Scroll), а не «Антимаг», «БКБ», «Рошан», «обсервер». Не придумывай названий, которых нет в фактах.
+ЯЗЫК: пиши весь отчёт только на русском языке. Названия НЕ переводи и не транслитерируй: имена героев, способностей, предметов и юнитов пиши латиницей ровно так, как они даны в фактах (Anti-Mage, Black King Bar, Arcane Orb, Roshan, Observer Ward, Sentry Ward, Smoke of Deceit, TP Scroll), а не «Антимаг», «БКБ», «Рошан», «обсервер». Английские названия не склоняй и не добавляй к ним русских окончаний: «убил Huskar», «против Lion», а не «Huskarу», «Lionа». Золото и нетворс измеряй в золоте, а не в «очках». Не придумывай названий, которых нет в фактах.
 
 Правила:
 - Используй только данные тебе факты. Числа и время копируй из них точно. Никогда не придумывай события, время, бай-беки, киллы, способности, предметы или места на карте.
@@ -35,11 +36,15 @@ export function buildMatchSystemPrompt(analysis: MatchAnalysis): string {
 - Оценивай игрока по задачам его роли, а не по показателям, за которые его роль не отвечает. Никогда не давай советов про: ${role.neverAdviseOn.join("; ")}.
 - Обращайся к игроку на «ты». Говори, что произошло, какое решение или привычка это вызвали и что делать вместо этого. Говори уверенно: без «возможно», «может быть», «вероятно».
 - У каждой фазы уже есть вердикт (выиграна / наравне / проиграна), посчитанный по нетворсу против соперника. Не противоречь ему. Если фаза выиграна - скажи, что сработало и что продолжать делать, не выдумывай проблем.
-- Поле "decision" строй из проверенных причин этой фазы (№1 - самая серьёзная): назови решение или привычку, стоящую за ними, и обязательно привяжи вывод к конкретному времени или числу из фактов этой фазы (например: «Смерти в 12:06 и 12:46 вне тимфайтов показывают, что ты ходил по карте один без обзора»). Не утверждай конкретных действий, которых нет в фактах (хайграунд, Roshan, Smoke of Deceit, TP Scroll и т.п.).
+- Поле "decision" строй из проверенных причин этой фазы (№1 - самая серьёзная): назови решение или привычку, стоящую за причиной №1, своими словами и привяжи вывод к её времени или числу. Если причина говорит «в тимфайте» - смерть была в драке, а не в одиночку; не меняй этого. Не утверждай конкретных действий, которых нет в фактах (хайграунд, Roshan, Smoke of Deceit, TP Scroll и т.п.).
 - В полях "whatWentWrong" и "decision" описывай только то, что подтверждают факты этой фазы. Советы - только в "doInstead".
 - Поле "doInstead" строй из тренерских принципов, приведённых для этой фазы, и делай его конкретным с помощью чисел и времени из фактов.
 - Называй предмет только если он есть в фактах. Не советуй купить то, чего тебе не показали.
 - Совет должен быть конкретным и выполнимым в следующей игре: где стоять, что делать с волной, когда драться или отступать, что фармить. Не «играй лучше».
+- Если в фактах фазы сказано, что твоя команда сильно отставала, защищала базу или играла вчетвером, советуй, как обороняться и выживать (где безопасно фармить, как ловить врагов на своей половине, когда отдать башню), а не атаковать хайграунд или пушить.
+- Если в начале данных есть «Контекст игры» (Turbo, игрок покинул игру), учитывай его: если союзник покинул игру, скажи об этом в итоге - это объясняет исход лучше любой личной ошибки; если игрок сам покинул игру, разбирай только время до этого.
+- Смотри на игру целиком: блок «Ход игры» говорит, как менялся перевес команды и какие драки его решили. Если там сказано, что выигранная игра упущена, итог обязан объяснить, где и как был потерян перевес (переломные драки, постройки, Aegis, выкуп) и что в этом сделал игрок, а не начинаться с линии. Если был камбэк - назови драку, которая его сделала.
+- Оценивай поведение, а не только цифры: где игрок умирал, кто был рядом, был ли он первым, кого достал враг, погиб ли он перед дракой. Эти факты важнее разницы в нетворсе.
 
 ${GAME_PRINCIPLES}
 
@@ -78,12 +83,19 @@ export function buildMatchCoachPrompt(analysis: MatchAnalysis): string {
   });
 
   const parts: string[] = [
+    ...(analysis.context.notes.length > 0
+      ? [`Контекст игры:\n${analysis.context.notes.map((n) => `- ${n}`).join("\n")}`]
+      : []),
     `Матч ${analysis.matchId}: ${analysis.heroName}, роль - ${analysis.positionLabel} (${POSITION_SOURCE_NOTE[analysis.positionSource]}). Матч ${analysis.win ? "ВЫИГРАН" : "ПРОИГРАН"}, длительность ${formatMatchTime(analysis.durationSeconds)}.`,
     analysis.counterpart
       ? `Соперник на той же позиции: ${analysis.counterpart.heroName}.`
       : "Соперника на той же позиции определить не удалось.",
     analysis.laneSummary,
   ];
+
+  if (analysis.gameFlow) {
+    parts.push(`Ход игры (вся игра, а не одна фаза):\n${analysis.gameFlow.facts.map((f) => `- ${f}`).join("\n")}`);
+  }
 
   if (analysis.netWorth.length > 0) {
     parts.push(
@@ -111,6 +123,10 @@ export function buildMatchCoachPrompt(analysis: MatchAnalysis): string {
         .map((s) => `- ${s.label}: ${s.value}${s.unit ? ` ${s.unit}` : ""}${s.percentile !== undefined ? ` (${s.percentile}-й перцентиль)` : ""}`)
         .join("\n")}`
     );
+  }
+
+  if (analysis.priorities.length > 0) {
+    parts.push(`Главная проблема по данным (уже проверена): ${analysis.priorities[0].metric}`);
   }
 
   parts.push(`Способности героя ${analysis.heroName}: ${kit.join(", ")}. Упоминай только способности из этого списка.`);
@@ -182,6 +198,64 @@ export function keepOriginalNames(text: string): string {
   return ORIGINAL_NAMES.reduce((acc, [rx, name]) => acc.replace(rx, name), text);
 }
 
+// Verdicts are decided in code; the model reliably restated them wrong
+// ("ты проиграл лейтгейм" for a late game won by 1 152 net worth, or about a
+// late game folded into the mid game and never judged on its own).
+const PHASE_WORDS: Record<PhaseId, RegExp> = {
+  laning: /(?<!\p{L})(?:лини(?:я|и|ю|ей)|лайнинг\p{L}*)(?!\p{L})/iu,
+  midGame: /мидгейм|середин\p{L}*\s+игры/iu,
+  lateGame: /лейтгейм|поздн\p{L}*\s+(?:игр|стади|фаз)/iu,
+};
+const WON_CLAIM = /выигр|обыгр|переигр/iu;
+const LOST_CLAIM = /проигр|уступил/iu;
+
+// A claim is a win/lose verb with a phase as its object: within four words
+// after it ("выиграл линию и мидгейм") or two before ("мидгейм проигран") -
+// not any phase word in the sentence ("проиграл игру из-за смертей на линии").
+// "Ты проиграл из-за..." about a game that was won. Only a claim about the
+// game itself counts: the verb with "игру/матч", or with nothing after it.
+const GAME_RESULT = /(?<!\p{L})(вы|про)игр\p{L}*(?=\s+(?:эту\s+|этот\s+)?(?:игру|матч)|\s+(?:из-за|потому|благодаря)|\s*[,.!]|\s*$)/iu;
+
+function contradictsResult(sentence: string, win: boolean): boolean {
+  const m = sentence.match(GAME_RESULT);
+  if (!m || m.index === undefined) return false;
+  // "Линия проиграна." is about a phase - contradictsVerdicts' job.
+  const before = sentence.slice(0, m.index).trim().split(/\s+/).slice(-3).join(" ");
+  if (Object.values(PHASE_WORDS).some((rx) => rx.test(before))) return false;
+  return (m[1].toLowerCase() === "вы") !== win;
+}
+
+function contradictsVerdicts(sentence: string, phases: PhaseAnalysis[]): boolean {
+  for (const clause of sentence.split(/[,;]|\s(?:но|а|однако|зато)\s/iu)) {
+    const words = clause.trim().split(/\s+/);
+    for (let i = 0; i < words.length; i++) {
+      const won = WON_CLAIM.test(words[i]);
+      if (won === LOST_CLAIM.test(words[i])) continue;
+      const object = [...words.slice(Math.max(0, i - 2), i), ...words.slice(i + 1, i + 5)].join(" ");
+      for (const id of Object.keys(PHASE_WORDS) as PhaseId[]) {
+        if (!PHASE_WORDS[id].test(object)) continue;
+        const phase = phases.find((p) => p.id === id);
+        // A phase that was never judged on its own (a short late game is
+        // folded into the mid game) can't have been won or lost either.
+        if (!phase) return true;
+        if (won ? phase.verdict === "lost" : phase.verdict === "won") return true;
+      }
+    }
+  }
+  return false;
+}
+
+// "умер 2 раза до 5:00" when one of the two came after it - the model merges
+// "2 deaths in lane" and "1 before 5:00" into one wrong claim.
+const DEATHS_BEFORE = /(\d+)\s+(?:раз\p{L}*|смерт\p{L}*)[^.;()]{0,30}?\sдо\s+(\d{1,2}):(\d{2})/iu;
+
+function deathCountOk(sentence: string, deathTimes: number[]): boolean {
+  const m = sentence.match(DEATHS_BEFORE);
+  if (!m || !/умер|смерт|погиб/iu.test(sentence)) return true;
+  const before = Number(m[2]) * 60 + Number(m[3]);
+  return deathTimes.filter((t) => t < before).length === Number(m[1]);
+}
+
 function claimsOk(sentence: string, phaseSource: string): boolean {
   // A time is real only for the phase it happened in - a mid-game death
   // quoted in the laning entry is a real time misattributed.
@@ -201,6 +275,7 @@ function escapeRegExp(text: string): string {
 function makeChecker(analysis: MatchAnalysis) {
   const knownTimes = new Set(analysis.knownTimes);
   const sourceText = [
+    ...(analysis.gameFlow?.facts ?? []),
     analysis.laneSummary,
     ...analysis.endStateVsCounterpart,
     ...analysis.phases.flatMap((p) => [p.verdictBasis, ...p.facts, ...p.causes]),
@@ -228,6 +303,9 @@ function makeChecker(analysis: MatchAnalysis) {
       if (!knownNumbers.some((k) => Math.abs(k - value) <= Math.max(1, k * NUMBER_TOLERANCE))) return false;
     }
     if (BUYBACK.test(sentence) && !factsMentionBuyback && analysis.buybacksUsed === 0) return false;
+    if (contradictsVerdicts(sentence, analysis.phases)) return false;
+    if (contradictsResult(sentence, analysis.win)) return false;
+    if (!deathCountOk(sentence, analysis.deathTimes)) return false;
     if (bigItems.some((rx) => rx.test(sentence))) return false;
     return true;
   };
@@ -289,6 +367,13 @@ function firstSentences(text: string, count: number): string {
   return text.split(/(?<=[.!?])\s+/).slice(0, count).join(" ");
 }
 
+function leaverNote(l: MatchAnalysis["context"]["leavers"][number]): string {
+  const when = l.time !== null ? ` в ${formatMatchTime(l.time)}` : "";
+  return l.isYou
+    ? ` Ты покинул игру${when}, поэтому разбор - только до этого момента.`
+    : ` ${l.heroName} из твоей команды покинул игру${when}, и дальше вы играли вчетвером.`;
+}
+
 const VERDICT_WORD: Record<PhaseVerdict, string> = {
   won: "выиграна",
   even: "наравне",
@@ -298,7 +383,8 @@ const VERDICT_WORD: Record<PhaseVerdict, string> = {
 // Built from the verified analysis alone - used when the model's summary is
 // rejected, or isn't written to the player ("ты").
 function fallbackSummary(analysis: MatchAnalysis): string {
-  const result = `Ты ${analysis.win ? "выиграл" : "проиграл"} эту игру на ${analysis.heroName} (${analysis.positionLabel}).`;
+  const left = analysis.context.leavers.find((l) => l.isYou || l.yourTeam);
+  const result = `Ты ${analysis.win ? "выиграл" : "проиграл"} эту игру на ${analysis.heroName} (${analysis.positionLabel}).${left ? leaverNote(left) : ""}`;
   if (analysis.phases.length === 0) {
     const versus = analysis.counterpart
       ? ` У матча нет поминутных данных (реплей не был полностью разобран), поэтому разбор построен только на итоговых цифрах против ${analysis.counterpart.heroName} - врага на твоей позиции.`
@@ -323,6 +409,8 @@ function fallbackSummary(analysis: MatchAnalysis): string {
 export function assembleMatchReport(raw: RawMatchReport, analysis: MatchAnalysis): CoachReport {
   const check = makeChecker(analysis);
   const allPhasesSource = [
+    ...analysis.context.notes,
+    ...(analysis.gameFlow?.facts ?? []),
     analysis.laneSummary,
     ...analysis.endStateVsCounterpart,
     ...analysis.phases.flatMap((p) => [p.verdictBasis, ...p.facts, ...p.causes]),

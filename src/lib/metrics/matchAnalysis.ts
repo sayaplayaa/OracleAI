@@ -3,8 +3,13 @@ import { formatGold, formatMatchTime, formatSigned, pluralRu } from "../format";
 import { heroKitHasDisable, heroKitHasHealing } from "../coach/kit";
 import { principleFor, type CauseCode } from "../coach/principles";
 import { roleProfileFor, type RoleProfile } from "../coach/roles";
+import { buildGameContext, isTurbo } from "./gameContext";
+import { buildGameFlow } from "./gameFlow";
+import { analysePositioning } from "./positioning";
 import { classifyZone, isBaseCell, laneOfCell, positionCells, type MapZone } from "./mapZones";
 import type { ResolvedPositions } from "./matchPositions";
+import type { StratzPositionTrack } from "../stratz";
+import { interpolateTime, levelForXp, xpForLevel } from "./skillBuild";
 import type {
   DeathVisionMoment,
   ItemProgressionPoint,
@@ -22,12 +27,42 @@ import type {
 
 const CHECKPOINT_MINUTES = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60];
 const MIN_PHASE_SECONDS = 90;
-// Phase 2 ends and phase 3 starts here regardless of how long the game runs.
-const PHASE_DEFS: { id: PhaseId; label: string; from: number; to: number }[] = [
-  { id: "laning", label: "Линия", from: 0, to: 600 },
-  { id: "midGame", label: "Мидгейм", from: 600, to: 1500 },
-  { id: "lateGame", label: "Лейтгейм", from: 1500, to: Number.POSITIVE_INFINITY },
-];
+
+interface PhaseBounds {
+  laneEnd: number;
+  midEnd: number;
+  // A late game shorter than this is folded into the mid game: the two
+  // minutes before the throne falls aren't a phase to judge on their own
+  // (it produced "no kills all late game" for a 2:45 window).
+  minLate: number;
+  // Minutes at which lane last hits/XP are compared.
+  laneCheckpoints: [number, number];
+  earlyDeathCut: number;
+  // Team gold deficit from which a phase counts as being stomped: pushing
+  // buildings or hunting kills aren't fair asks then.
+  farBehind: number;
+}
+
+const NORMAL_BOUNDS: PhaseBounds = {
+  laneEnd: 600,
+  midEnd: 1500,
+  minLate: 300,
+  laneCheckpoints: [5, 10],
+  earlyDeathCut: 300,
+  farBehind: 5000,
+};
+// Turbo roughly doubles income and its games run ~20 minutes, so everything
+// happens earlier. Approximate - there's no official "Turbo laning" length.
+const TURBO_BOUNDS: PhaseBounds = {
+  laneEnd: 420,
+  midEnd: 960,
+  minLate: 180,
+  laneCheckpoints: [3, 7],
+  earlyDeathCut: 180,
+  farBehind: 8000,
+};
+
+const LEVEL_SIX_XP = xpForLevel(6) ?? 1760;
 
 interface DeathEvent {
   time: number;
@@ -61,6 +96,8 @@ interface Cause {
   code: CauseCode;
   severity: number;
   text: string;
+  // A measurable goal for the next game, from this game's real numbers.
+  target?: string;
 }
 
 interface Ctx {
@@ -69,6 +106,10 @@ interface Ctx {
   counterpart: OpenDotaMatchPlayer | null;
   role: RoleProfile;
   isCore: boolean;
+  bounds: PhaseBounds;
+  // Where the analysis stops: the end of the game, or the moment this player
+  // left it - nothing after that is theirs to be judged on.
+  end: number;
   deaths: DeathEvent[];
   // False when the reconstructed `deaths` list is shorter than the real,
   // authoritative player.deaths count - callers must never claim "0 deaths"
@@ -81,6 +122,10 @@ interface Ctx {
   metaItemTiming: ItemProgressionPoint[];
   metrics: MatchMetrics;
   time: (seconds: number) => string;
+  // From every hero's movement (STRATZ), when available: death time ->
+  // distance to the nearest living ally; missed fight -> where you were.
+  nearestAllyAtDeath: Map<number, number>;
+  whereDuringMissedFight: Map<number, string>;
 }
 
 function at(arr: number[] | undefined, minute: number): number | null {
@@ -253,6 +298,8 @@ function deathList(ctx: Ctx, deaths: DeathEvent[], withFightContext = true): str
         parts.push("вражеских Observer Ward рядом не было");
       }
       if (m?.farmingLastHits) parts.push(`фармил: +${m.farmingLastHits} добиваний перед смертью`);
+      const ally = ctx.nearestAllyAtDeath.get(d.time);
+      if (ally !== undefined && !d.inFight) parts.push(`ближайший союзник в ${formatGold(Math.round(ally / 100) * 100)} ед.`);
       if (d.boughtBack) parts.push("бай-бек");
       return `${ctx.time(d.time)} ${d.killer}${parts.length > 0 ? ` (${parts.join("; ")})` : ""}`;
     })
@@ -262,6 +309,21 @@ function deathList(ctx: Ctx, deaths: DeathEvent[], withFightContext = true): str
 // " 3 раза" for repeated events, nothing for a single one.
 function timesRu(count: number): string {
   return count > 1 ? ` ${count} ${pluralRu(count, ["раз", "раза", "раз"])}` : "";
+}
+
+// "потеряла 1 героя / 3 героя / 5 героев".
+function heroesRu(n: number): string {
+  return `${n} ${pluralRu(n, ["героя", "героя", "героев"])}`;
+}
+
+// "1 бой / 3 боя / 5 боёв".
+function fightsRu(n: number): string {
+  return `${n} ${pluralRu(n, ["бой", "боя", "боёв"])}`;
+}
+
+// "1 раз", "2 раза", "5 раз".
+function countRu(count: number): string {
+  return `${count} ${pluralRu(count, ["раз", "раза", "раз"])}`;
 }
 
 const KILLER_LABEL: Partial<Record<DeathVisionMoment["killer"]["kind"], string>> = {
@@ -283,6 +345,7 @@ function deathContextCauses(ctx: Ctx, deaths: DeathEvent[]): Cause[] {
       text: `Вне тимфайтов ты${timesRu(seen.length)} умер в радиусе вражеского Observer Ward: ${seen
         .map((d) => `${ctx.time(d.time)} (вард поставил ${d.moment!.enemyWard!.placedBy ?? "враг"} в ${ctx.time(d.moment!.enemyWard!.time)})`)
         .join(", ")} - враги видели, как ты подходишь.`,
+      target: `0 смертей вне драк в радиусе вражеского Observer Ward (в этой игре - ${seen.length})`,
     });
   }
   const creeps = deaths.filter((d) => d.moment && (d.moment.killer.kind === "creeps" || d.moment.killer.kind === "tower"));
@@ -293,6 +356,7 @@ function deathContextCauses(ctx: Ctx, deaths: DeathEvent[]): Cause[] {
       text: `Тебя${timesRu(creeps.length)} добили не герои, а ${creeps
         .map((d) => `${KILLER_LABEL[d.moment!.killer.kind]} в ${ctx.time(d.time)}`)
         .join(", ")} - ты остался в волне или под башней с низким здоровьем.`,
+      target: `0 смертей от крипов и башен (в этой игре - ${creeps.length})`,
     });
   }
   return causes;
@@ -319,13 +383,13 @@ function roshanIn(match: OpenDotaMatch, from: number, to: number, yourIsRadiant:
     .map((o) => ({ time: o.time, yours: o.team === yourTeam }));
 }
 
-function itemTimingFacts(ctx: Ctx, from: number, to: number): { facts: string[]; lateCauses: string[] } {
+function itemTimingFacts(ctx: Ctx, from: number, to: number): { facts: string[]; lateCauses: Cause[] } {
   const metaByKey = new Map(ctx.metaItemTiming.map((m) => [m.itemKey, m]));
   const rows = ctx.metrics.itemTimeline
     .filter((p) => p.time >= from && p.time < to && metaByKey.has(p.itemKey))
     .map((p) => {
       const meta = metaByKey.get(p.itemKey)!;
-      return { name: p.itemName, time: p.time, deltaMin: (p.time - meta.avgTimeSeconds) / 60 };
+      return { name: p.itemName, time: p.time, metaTime: meta.avgTimeSeconds, deltaMin: (p.time - meta.avgTimeSeconds) / 60 };
     });
   if (rows.length === 0) return { facts: [], lateCauses: [] };
 
@@ -338,29 +402,79 @@ function itemTimingFacts(ctx: Ctx, from: number, to: number): { facts: string[];
     })`;
   return {
     facts: [`Тайминги ключевых предметов относительно типичного (самого частого) метового тайминга для этого героя и позиции: ${shown.map(label).join("; ")}.`],
-    lateCauses: rows.filter((r) => r.deltaMin >= 2.5).map((r) => `${label(r)} - ключевой предмет собран с опозданием.`),
+    lateCauses: rows
+      .filter((r) => r.deltaMin >= 2.5)
+      .map((r) => ({
+        code: "LATE_CORE_ITEM" as const,
+        severity: 30,
+        text: `${label(r)} - ключевой предмет собран с опозданием.`,
+        target: `${r.name} к ~${formatMatchTime(r.metaTime)} - типичный тайминг (в этой игре - ${formatMatchTime(r.time)})`,
+      })),
   };
+}
+
+interface ObserverFate {
+  time: number;
+  // Enemy hero who destroyed it; null when it lasted until it expired.
+  dewardedBy: string | null;
+}
+
+// What happened to each Observer Ward this player placed: the removal log's
+// attackername is the placer's own hero when a ward simply expires, and the
+// enemy hero who killed it otherwise.
+function observerFates(match: OpenDotaMatch, player: OpenDotaMatchPlayer): ObserverFate[] {
+  const enemies = new Map(
+    match.players
+      .filter((p) => p.isRadiant !== player.isRadiant)
+      .map((p) => [getHeroInternalName(p.hero_id), getHeroName(p.hero_id)] as const)
+  );
+  return (player.obs_log ?? []).map((w) => {
+    const removed = (player.obs_left_log ?? []).find(
+      (l) =>
+        l.time >= w.time &&
+        (w.ehandle !== undefined && l.ehandle !== undefined ? l.ehandle === w.ehandle : l.x === w.x && l.y === w.y)
+    );
+    return { time: w.time, dewardedBy: removed?.attackername ? enemies.get(removed.attackername) ?? null : null };
+  });
 }
 
 function wardCause(ctx: Ctx, from: number, to: number): Cause | null {
   if (ctx.isCore) return null;
   const placed = [...(ctx.you.obs_log ?? []), ...(ctx.you.sen_log ?? [])].filter((w) => w.time >= from && w.time < to).length;
-  const window = Math.min(to, ctx.match.duration) - from;
+  const window = Math.min(to, ctx.end) - from;
   const expected = Math.floor(window / 300); // roughly one ward every five minutes as a floor
   if (expected < 1 || placed >= Math.min(expected, 2)) return null;
   return {
     code: "NO_VISION",
     severity: ctx.role.position === 5 ? 40 : 25,
-    text: `Поставил всего ${placed} ${placed === 1 ? "вард" : "варда"} между ${ctx.time(from)} и ${ctx.time(Math.min(to, ctx.match.duration))} - обзор - это работа саппорта.`,
+    text: `Поставил всего ${placed} ${pluralRu(placed, ["вард", "варда", "вардов"])} между ${ctx.time(from)} и ${ctx.time(Math.min(to, ctx.end))} - обзор - это работа саппорта.`,
+    target: `хотя бы 1 вард каждые 5 минут - ${expected}+ за ${formatMatchTime(from)}-${formatMatchTime(Math.min(to, ctx.end))} (в этой игре - ${placed})`,
   };
 }
 
-function wardFacts(ctx: Ctx, from: number, to: number): string[] {
-  const inWindow = (log: { time: number }[] | undefined) => (log ?? []).filter((w) => w.time >= from && w.time < to);
-  const obs = inWindow(ctx.you.obs_log);
+function wardFacts(ctx: Ctx, from: number, to: number): { facts: string[]; causes: Cause[] } {
+  const inWindow = <T extends { time: number }>(log: T[] | undefined) => (log ?? []).filter((w) => w.time >= from && w.time < to);
+  const obs = inWindow(observerFates(ctx.match, ctx.you));
   const sen = inWindow(ctx.you.sen_log);
-  const line = `Варды, поставленные тобой в этой фазе: Observer Ward - ${obs.length}${obs.length > 0 ? ` (${obs.map((w) => ctx.time(w.time)).join(", ")})` : ""}, Sentry Ward - ${sen.length}.`;
-  return [line];
+  const dewarded = obs.filter((w) => w.dewardedBy !== null);
+  const fates =
+    obs.length > 0
+      ? ` (${obs.map((w) => ctx.time(w.time)).join(", ")}${dewarded.length > 0 ? `; враг снял ${dewarded.length} из ${obs.length}` : ""})`
+      : "";
+  const causes: Cause[] = [];
+  if (obs.length >= 2 && dewarded.length >= 2 && dewarded.length / obs.length >= 0.5) {
+    const by = [...new Set(dewarded.map((w) => w.dewardedBy))].join(", ");
+    causes.push({
+      code: "WARDS_DEWARDED",
+      severity: 15 + dewarded.length * 10,
+      text: `Враг снял ${dewarded.length} из ${obs.length} твоих Observer Ward в этой фазе (${dewarded.map((w) => ctx.time(w.time)).join(", ")}; снимали ${by}) - эти точки он проверяет.`,
+      target: `большинство Observer Ward доживают до конца (в этой фазе враг снял ${dewarded.length} из ${obs.length})`,
+    });
+  }
+  return {
+    facts: [`Варды, поставленные тобой в этой фазе: Observer Ward - ${obs.length}${fates}, Sentry Ward - ${sen.length}.`],
+    causes,
+  };
 }
 
 function lanePresenceFact(ctx: Ctx): string | null {
@@ -379,14 +493,29 @@ function lanePresenceFact(ctx: Ctx): string | null {
   return `Присутствие на линии за первые ~11 минут (без учёта времени на базе): ${Math.round((inLane / away) * 100)}% на своей линии, ${Math.round((elsewhere / away) * 100)}% джангл/река/другие линии.`;
 }
 
+// When each player hit level 6 (the ultimate), interpolated from the real
+// per-minute XP curve - the single most telling laning number for a core.
+function levelSixFact(ctx: Ctx, name: string, laneEnd: number): string | null {
+  const { you, counterpart } = ctx;
+  if (!counterpart || !you.xp_t || !counterpart.xp_t) return null;
+  const mine = interpolateTime(you.xp_t, LEVEL_SIX_XP);
+  const theirs = interpolateTime(counterpart.xp_t, LEVEL_SIX_XP);
+  const show = (t: number | null) => (t !== null && t <= laneEnd ? `~${ctx.time(t)}` : `не дошёл до 6 уровня к ${ctx.time(laneEnd)}`);
+  if (mine === null && theirs === null) return null;
+  return `6-й уровень (ультимейт): ты ${show(mine)}, ${name} ${show(theirs)}.`;
+}
+
 function buildLaning(ctx: Ctx, from: number, to: number): { facts: string[]; causes: Cause[]; participated: boolean } {
   const { you, counterpart, isCore } = ctx;
   const facts: string[] = [];
   const causes: Cause[] = [];
   const name = counterpart ? getHeroName(counterpart.hero_id) : "соперник";
+  const roleName = ctx.role.label.split(" (")[0];
+  const laneEndMin = Math.floor(to / 60);
+  const laneEnd = ctx.time(laneEndMin * 60);
 
   if (isCore && counterpart) {
-    for (const m of [5, 10]) {
+    for (const m of ctx.bounds.laneCheckpoints.filter((c) => c <= laneEndMin)) {
       const lh = [at(you.lh_t, m), at(counterpart.lh_t, m)] as const;
       const xp = [at(you.xp_t, m), at(counterpart.xp_t, m)] as const;
       const dn = [at(you.dn_t, m), at(counterpart.dn_t, m)] as const;
@@ -396,21 +525,33 @@ function buildLaning(ctx: Ctx, from: number, to: number): { facts: string[]; cau
         );
       }
     }
-    const lh10 = [at(you.lh_t, 10), at(counterpart.lh_t, 10)] as const;
-    if (lh10[0] !== null && lh10[1] !== null && lh10[0] - lh10[1] <= -8) {
-      causes.push({ code: "CS_DEFICIT",
-        severity: Math.min(60, (lh10[1] - lh10[0]) * 3),
-        text: `Отставание по фарму на линии: ${lh10[0]} добиваний на ${ctx.time(600)} против ${lh10[1]} у ${name}, вражеского ${ctx.role.label.split(" (")[0]}.`,
+    const six = levelSixFact(ctx, name, to);
+    if (six) facts.push(six);
+
+    const lhEnd = [at(you.lh_t, laneEndMin), at(counterpart.lh_t, laneEndMin)] as const;
+    const csGap = Math.max(5, Math.round((8 * laneEndMin) / 10));
+    if (lhEnd[0] !== null && lhEnd[1] !== null && lhEnd[0] - lhEnd[1] <= -csGap) {
+      causes.push({
+        code: "CS_DEFICIT",
+        severity: Math.min(60, (lhEnd[1] - lhEnd[0]) * 3),
+        text: `Отставание по фарму на линии: ${lhEnd[0]} добиваний на ${laneEnd} против ${lhEnd[1]} у ${name}, вражеского ${roleName}.`,
+        target: `${lhEnd[1]}+ добиваний к ${laneEnd} - столько было у ${name} (у тебя ${lhEnd[0]})`,
       });
     }
-    const xp10 = [at(you.xp_t, 10), at(counterpart.xp_t, 10)] as const;
-    if (xp10[0] !== null && xp10[1] !== null && xp10[0] - xp10[1] <= -250) {
-      causes.push({ code: "XP_DEFICIT",
-        severity: Math.min(50, (xp10[1] - xp10[0]) / 8),
-        text: `Отставание по уровню/опыту на ${ctx.time(600)}: ${formatGold(xp10[0])} против ${formatGold(xp10[1])} опыта - отставание по уровням и открытию способностей.`,
+    const xpEnd = [at(you.xp_t, laneEndMin), at(counterpart.xp_t, laneEndMin)] as const;
+    if (xpEnd[0] !== null && xpEnd[1] !== null && xpEnd[1] - xpEnd[0] >= Math.max(250, 0.08 * xpEnd[1])) {
+      const [mine, theirs] = [levelForXp(xpEnd[0]), levelForXp(xpEnd[1])];
+      causes.push({
+        code: "XP_DEFICIT",
+        severity: Math.min(50, (xpEnd[1] - xpEnd[0]) / 8),
+        text: `Отставание по уровню/опыту на ${laneEnd}: ${formatGold(xpEnd[0])} против ${formatGold(xpEnd[1])} опыта${theirs > mine ? ` (${mine} уровень против ${theirs})` : ""} - отставание по уровням и открытию способностей.`,
+        target:
+          theirs > mine
+            ? `${theirs} уровень к ${laneEnd} - как у ${name} (у тебя был ${mine})`
+            : `${formatGold(xpEnd[1])}+ опыта к ${laneEnd} - как у ${name} (у тебя ${formatGold(xpEnd[0])})`,
       });
     }
-    if (ctx.metrics.laneEfficiency !== null) {
+    if (ctx.metrics.laneEfficiency !== null && !isTurbo(ctx.match.game_mode)) {
       facts.push(`Эффективность линии (OpenDota, относительно идеального фарма): ${ctx.metrics.laneEfficiency}%.`);
     }
     const presence = lanePresenceFact(ctx);
@@ -419,7 +560,7 @@ function buildLaning(ctx: Ctx, from: number, to: number): { facts: string[]; cau
 
   // The minute-pair where the gap to the counterpart opened the most.
   let worst: { from: number; to: number; before: number; after: number } | null = null;
-  for (let m = 2; m <= 10; m++) {
+  for (let m = 2; m <= laneEndMin; m++) {
     const a = checkpointAt(ctx, m - 2);
     const b = checkpointAt(ctx, m);
     if (a && b && (!worst || b.diff - a.diff < worst.after - worst.before)) {
@@ -428,7 +569,8 @@ function buildLaning(ctx: Ctx, from: number, to: number): { facts: string[]; cau
   }
   if (worst && worst.after - worst.before <= -150) {
     const around = ctx.deaths.filter((d) => d.time >= worst!.from * 60 - 15 && d.time <= worst!.to * 60 + 15);
-    causes.push({ code: "GAP_OPENED",
+    causes.push({
+      code: "GAP_OPENED",
       severity: Math.min(45, (worst.before - worst.after) / 8),
       text: `Разрыв в нетворсе с ${name} образовался между ${ctx.time(worst.from * 60)} и ${ctx.time(worst.to * 60)} (${formatSigned(worst.before)} -> ${formatSigned(worst.after)})${
         around.length > 0 ? `, в то же окно, что и ${around.length > 1 ? "твои смерти" : "твоя смерть"} в ${around.map((d) => ctx.time(d.time)).join(", ")}` : ""
@@ -440,12 +582,14 @@ function buildLaning(ctx: Ctx, from: number, to: number): { facts: string[]; cau
   if (laneDeaths.length > 0) {
     const dead = laneDeaths.reduce((s, d) => s + d.timeDead, 0);
     const lost = laneDeaths.reduce((s, d) => s + d.goldLost, 0);
-    const early = laneDeaths.filter((d) => d.time < 300).length;
-    causes.push({ code: "EARLY_DEATHS",
+    const early = laneDeaths.filter((d) => d.time < ctx.bounds.earlyDeathCut).length;
+    causes.push({
+      code: "EARLY_DEATHS",
       severity: laneDeaths.length * 30 + early * 15,
-      text: `Умер ${laneDeaths.length} раз${laneDeaths.length > 1 ? "а" : ""} на линии${
-        early > 0 ? ` (${early} до ${ctx.time(300)})` : ""
+      text: `Умер ${countRu(laneDeaths.length)} на линии${
+        early > 0 ? ` (${early} до ${ctx.time(ctx.bounds.earlyDeathCut)})` : ""
       }${dead > 0 ? `, ${dead} сек в мёртвом состоянии` : ""}${lost > 0 ? ` и потерял ${formatGold(lost)} золота` : ""} - каждая смерть также отдаёт врагу волну и опыт.`,
+      target: `${laneDeaths.length >= 2 ? "не больше 1 смерти" : "ни одной смерти"} до ${laneEnd} (в этой игре - ${laneDeaths.length})`,
     });
   }
   const killerCounts = new Map<string, number>();
@@ -454,9 +598,11 @@ function buildLaning(ctx: Ctx, from: number, to: number): { facts: string[]; cau
   }
   for (const [killer, count] of killerCounts) {
     if (count >= 2) {
-      causes.push({ code: "REPEAT_KILLER",
+      causes.push({
+        code: "REPEAT_KILLER",
         severity: 25 + count * 5,
-        text: `${killer} убил тебя ${count} раз(а) на линии - один и тот же килл повторился вместо того, чтобы подстроить дистанцию под его способности.`,
+        text: `${killer} убил тебя ${countRu(count)} на линии - один и тот же килл повторился вместо того, чтобы подстроить дистанцию под его способности.`,
+        target: `ни один враг не убивает тебя дважды за линию (в этой игре ${killer} - ${countRu(count)})`,
       });
     }
   }
@@ -465,18 +611,27 @@ function buildLaning(ctx: Ctx, from: number, to: number): { facts: string[]; cau
   return { facts, causes, participated: true };
 }
 
+interface PhaseSituation {
+  // The team was being stomped (or played a player down): pushing and late
+  // kills aren't fair asks, defending is the job.
+  farBehind: boolean;
+}
+
 function buildMidLate(
   ctx: Ctx,
   id: "midGame" | "lateGame",
   from: number,
   to: number,
   startCp: NetWorthCheckpoint | null,
-  endCp: NetWorthCheckpoint | null
+  endCp: NetWorthCheckpoint | null,
+  situation: PhaseSituation
 ): { facts: string[]; causes: Cause[]; participated: boolean } {
   const { you, counterpart, isCore, match } = ctx;
   const facts: string[] = [];
   const causes: Cause[] = [];
   const name = counterpart ? getHeroName(counterpart.hero_id) : "соперник";
+  const roleName = ctx.role.label.split(" (")[0];
+  const phaseName = id === "midGame" ? "мидгейме" : "лейтгейме";
 
   if (startCp && endCp) {
     const change = endCp.diff - startCp.diff;
@@ -484,7 +639,8 @@ function buildMidLate(
       `Разрыв в нетворсе с ${name} изменился с ${formatSigned(startCp.diff)} на ${ctx.time(startCp.minute * 60)} до ${formatSigned(endCp.diff)} на ${ctx.time(endCp.minute * 60)} (${change < 0 ? "увеличился" : "сократился"} на ${formatGold(Math.abs(change))}).`
     );
     if (change <= -400) {
-      causes.push({ code: "LOST_NET_WORTH",
+      causes.push({
+        code: "LOST_NET_WORTH",
         severity: Math.min(50, -change / 60),
         text: `Ты отстал на ${formatGold(-change)} нетворса от ${name} за эту фазу (${formatSigned(startCp.diff)} -> ${formatSigned(endCp.diff)}).`,
       });
@@ -504,9 +660,13 @@ function buildMidLate(
     const b = Math.round(incomeThem / span);
     facts.push(`Золото в минуту с ${ctx.time(startMin * 60)} до ${ctx.time(endMin * 60)}: ты ${formatGold(a)} против ${formatGold(b)} у ${name}.`);
     if (b > 0 && a < b * 0.8) {
-      causes.push({ code: "SLOW_FARM",
+      // Halfway to the counterpart: a jump that's actually reachable next game.
+      const goal = Math.round((a + b) / 2 / 10) * 10;
+      causes.push({
+        code: "SLOW_FARM",
         severity: Math.min(45, ((b - a) / b) * 100),
         text: `Скорость фарма ${formatGold(a)} золота/мин против ${formatGold(b)} у ${name} за ${ctx.time(startMin * 60)}-${ctx.time(endMin * 60)} - медленнее на ${Math.round((1 - a / b) * 100)}%.`,
+        target: `${formatGold(goal)}+ золота в минуту в ${phaseName} (в этой игре - ${formatGold(a)}, у ${name} - ${formatGold(b)})`,
       });
     }
   }
@@ -516,29 +676,39 @@ function buildMidLate(
     facts.push(`Смерти (${deaths.length}): ${deathList(ctx, deaths)}.`);
     const alone = deaths.filter((d) => !d.inFight);
     if (alone.length > 0) {
-      causes.push({ code: "PICKED_OFF",
+      causes.push({
+        code: "PICKED_OFF",
         severity: alone.length * 30,
-        text: `Умер ${alone.length} раз${alone.length > 1 ? "а" : ""} вне замеченных тимфайтов (${alone.map((d) => ctx.time(d.time)).join(", ")}) - тебя поймали одного, а не разменяли в бою с командой.`,
+        text: `Умер ${countRu(alone.length)} вне замеченных тимфайтов (${alone.map((d) => ctx.time(d.time)).join(", ")}) - тебя поймали одного, а не разменяли в бою с командой.`,
+        target: `0 смертей вне драк в ${phaseName} (в этой игре - ${alone.length})`,
       });
     }
     const deep = deaths.filter((d) => d.zone?.deepInEnemyTerritory);
     if (deep.length > 0) {
-      causes.push({ code: "DEEP_ENEMY_DEATH",
+      causes.push({
+        code: "DEEP_ENEMY_DEATH",
         severity: deep.length * 30,
-        text: `Погиб глубоко на вражеской территории ${deep.length} раз${deep.length > 1 ? "а" : ""} (${deep.map((d) => `${ctx.time(d.time)} - ${d.zone!.label}`).join("; ")}).`,
+        text: `Погиб глубоко на вражеской территории ${countRu(deep.length)} (${deep.map((d) => `${ctx.time(d.time)} - ${d.zone!.label}`).join("; ")}).`,
+        target: `0 смертей глубоко на вражеской половине без команды (в этой игре - ${deep.length})`,
       });
     }
     const dead = deaths.reduce((s, d) => s + d.timeDead, 0);
     if (dead > 0) {
-      facts.push(`Время в мёртвом состоянии за эту фазу: ${dead} сек (${Math.round((dead / (to - from)) * 100)}% фазы).`);
+      const share = Math.round((dead / (to - from)) * 100);
+      facts.push(`Время в мёртвом состоянии за эту фазу: ${dead} сек (${share}% фазы).`);
       if (dead / (to - from) >= 0.15) {
-        causes.push({ code: "DEAD_TIME", severity: 20 + dead / 10, text: `${Math.round((dead / (to - from)) * 100)}% этой фазы ты провёл мёртвым (${dead} сек) - это упущенный фарм, опыт и присутствие на карте.` });
+        causes.push({
+          code: "DEAD_TIME",
+          severity: 20 + dead / 10,
+          text: `${share}% этой фазы ты провёл мёртвым (${dead} сек) - это упущенный фарм, опыт и присутствие на карте.`,
+          target: `меньше 10% ${phaseName === "мидгейме" ? "мидгейма" : "лейтгейма"} мёртвым (в этой игре - ${share}%)`,
+        });
       }
     }
     causes.push(...deathContextCauses(ctx, deaths));
     const noBuyback = deaths.filter((d) => !d.boughtBack);
     if (id === "lateGame" && isCore && noBuyback.length === deaths.length && deaths.length >= 2) {
-      facts.push(`Ни разу не использовал бай-бек на эти ${deaths.length} смертей.`);
+      facts.push(`Ни разу не использовал бай-бек на эти ${deaths.length} ${pluralRu(deaths.length, ["смерть", "смерти", "смертей"])}.`);
     }
   } else if (ctx.deathDataComplete) {
     facts.push("Смертей в этой фазе не было.");
@@ -556,11 +726,14 @@ function buildMidLate(
         : "Твои килы героев: 0."
     );
   }
-  if (id === "lateGame" && isCore && kills.length === 0 && deaths.length > 0) {
+  // Kills in a game the team is losing badly come from defending, not from
+  // a carry choosing to farm elsewhere - not a fair thing to blame.
+  if (id === "lateGame" && isCore && kills.length === 0 && deaths.length > 0 && !situation.farBehind) {
     const last = ctx.heroKills.filter((k) => k.time < from).at(-1);
-    causes.push({ code: "NO_LATE_KILLS",
+    causes.push({
+      code: "NO_LATE_KILLS",
       severity: 35,
-      text: `Ни одного килла героя за весь лейтгейм${last ? ` (последний килл был в ${ctx.time(last.time)})` : ""}, при этом ты умер ${deaths.length} раз${deaths.length > 1 ? "а" : ""}.`,
+      text: `Ни одного килла героя за весь лейтгейм${last ? ` (последний килл был в ${ctx.time(last.time)})` : ""}, при этом ты умер ${countRu(deaths.length)}.`,
     });
   }
 
@@ -574,12 +747,19 @@ function buildMidLate(
     const took = fights.filter((f) => f.you.participated);
     const missed = fights.filter((f) => !f.you.participated);
     facts.push(
-      `Тимфайты: ${fights.length}; ты участвовал в ${took.length}${missed.length > 0 ? ` (отсутствовал в ${missed.map((f) => ctx.time(f.start)).join(", ")})` : ""}. В них твоя команда потеряла ${fights.reduce((s, f) => s + f.yourTeamDeaths, 0)} героев, а враг - ${fights.reduce((s, f) => s + f.enemyDeaths, 0)}.`
+      `Тимфайты: ${fights.length}; ты участвовал в ${took.length}${missed.length > 0 ? ` (отсутствовал в ${missed.map((f) => ctx.time(f.start)).join(", ")})` : ""}. В них твоя команда потеряла ${heroesRu(fights.reduce((s, f) => s + f.yourTeamDeaths, 0))}, а враг - ${fights.reduce((s, f) => s + f.enemyDeaths, 0)}.`
     );
     if (fights.length >= 3 && took.length / fights.length < 0.5) {
-      causes.push({ code: "ABSENT_FROM_FIGHTS",
+      causes.push({
+        code: "ABSENT_FROM_FIGHTS",
         severity: 30,
-        text: `Участвовал только в ${took.length} из ${fights.length} тимфайтов этой фазы (пропустил ${missed.map((f) => ctx.time(f.start)).join(", ")}).`,
+        text: `Участвовал только в ${took.length} из ${fights.length} тимфайтов этой фазы (пропустил ${missed
+          .map((f) => {
+            const where = ctx.whereDuringMissedFight.get(f.start);
+            return `${ctx.time(f.start)}${where ? ` - ты был: ${where}` : ""}`;
+          })
+          .join("; ")}).`,
+        target: `быть хотя бы в 2 из 3 драк команды (в этой игре - ${took.length} из ${fights.length})`,
       });
     }
 
@@ -589,20 +769,24 @@ function buildMidLate(
         const yours = compared.reduce((s, f) => s + f.you.damage, 0) / compared.length;
         const theirs = compared.reduce((s, f) => s + (f.counterpart?.damage ?? 0), 0) / compared.length;
         facts.push(
-          `Средний урон по героям за тимфайт: ты ${formatGold(yours)} против ${formatGold(theirs)} у ${name} (${compared.length} боёв).`
+          `Средний урон по героям за тимфайт: ты ${formatGold(yours)} против ${formatGold(theirs)} у ${name} (${fightsRu(compared.length)}).`
         );
         if (id === "lateGame" && theirs > 0 && yours < theirs * 0.65) {
-          causes.push({ code: "FIGHT_DAMAGE_GAP",
+          causes.push({
+            code: "FIGHT_DAMAGE_GAP",
             severity: 45,
-            text: `Ты наносил намного меньше урона в поздних тимфайтах, чем ${name}, вражеский ${ctx.role.label.split(" (")[0]}: ${formatGold(yours)} против ${formatGold(theirs)} среднего урона за бой за ${compared.length} боёв.`,
+            text: `Ты наносил намного меньше урона в поздних тимфайтах, чем ${name}, вражеский ${roleName}: ${formatGold(yours)} против ${formatGold(theirs)} среднего урона за бой за ${fightsRu(compared.length)}.`,
+            target: `${formatGold(theirs)}+ урона по героям за драку - как у ${name} (в этой игре - ${formatGold(yours)})`,
           });
         }
       }
       const diedIn = took.filter((f) => f.you.deaths > 0);
       if (id === "lateGame" && took.length >= 2 && diedIn.length / took.length >= 0.5) {
-        causes.push({ code: "DYING_IN_FIGHTS",
+        causes.push({
+          code: "DYING_IN_FIGHTS",
           severity: 40,
-          text: `Умирал в ${diedIn.length} из ${took.length} поздних боёв, в которых участвовал (${diedIn.map((f) => ctx.time(f.start)).join(", ")}) - мёртвый керри никого не убьёт.`,
+          text: `Умирал в ${diedIn.length} из ${took.length} поздних боёв, в которых участвовал (${diedIn.map((f) => ctx.time(f.start)).join(", ")}) - мёртвый кор-герой не наносит урона.`,
+          target: `выживать хотя бы в половине драк (в этой игре умер в ${diedIn.length} из ${took.length})`,
         });
       }
     }
@@ -610,8 +794,8 @@ function buildMidLate(
 
   const towers = towersIn(match, from, to, you.isRadiant);
   const bits: string[] = [];
-  if (towers.lost.length > 0) bits.push(`твоя команда потеряла ${towers.lost.length} башн${towers.lost.length > 1 ? "и" : "ю"} (${towers.lost.map((t) => ctx.time(t)).join(", ")})`);
-  if (towers.taken.length > 0) bits.push(`твоя команда забрала ${towers.taken.length} вражеск${towers.taken.length > 1 ? "ие" : "ую"} башн${towers.taken.length > 1 ? "и" : "ю"}`);
+  if (towers.lost.length > 0) bits.push(`твоя команда потеряла ${towers.lost.length} ${pluralRu(towers.lost.length, ["башню", "башни", "башен"])} (${towers.lost.map((t) => ctx.time(t)).join(", ")})`);
+  if (towers.taken.length > 0) bits.push(`твоя команда забрала ${towers.taken.length} ${pluralRu(towers.taken.length, ["вражескую башню", "вражеские башни", "вражеских башен"])}`);
   if (towers.barracksLost.length > 0) bits.push(`твои казармы/трон пали в ${towers.barracksLost.map((t) => ctx.time(t)).join(", ")}`);
   for (const r of roshanIn(match, from, to, you.isRadiant)) {
     bits.push(`${r.yours ? "твоя" : "вражеская"} команда убила Roshan в ${ctx.time(r.time)}`);
@@ -622,23 +806,31 @@ function buildMidLate(
     facts.push(
       `Урон по башням за всю игру: ты ${formatGold(you.tower_damage)} против ${formatGold(counterpart.tower_damage)} у ${name}.`
     );
-    if (counterpart.tower_damage > 0 && you.tower_damage < counterpart.tower_damage * 0.5 && match.duration > 1500) {
-      causes.push({ code: "LOW_BUILDING_PRESSURE",
+    // Pushing is a fair ask only when the team could push: not while the
+    // enemy is sieging your base.
+    // 145 against 358 is two creep waves' worth, not a habit.
+    const gap = counterpart.tower_damage - you.tower_damage;
+    if (gap >= 1500 && you.tower_damage < counterpart.tower_damage * 0.5 && !situation.farBehind) {
+      causes.push({
+        code: "LOW_BUILDING_PRESSURE",
         severity: 25,
         text: `Слабое давление на постройки: ${formatGold(you.tower_damage)} урона по башням против ${formatGold(counterpart.tower_damage)} у ${name} - в долгой игре задача кор-героя - забирать постройки и трон.`,
+        target: `${formatGold(counterpart.tower_damage)}+ урона по башням за игру - как у ${name} (в этой игре - ${formatGold(you.tower_damage)})`,
       });
     }
   }
 
   if (!isCore) {
-    facts.push(...wardFacts(ctx, from, to));
+    const wards = wardFacts(ctx, from, to);
+    facts.push(...wards.facts);
+    causes.push(...wards.causes);
     const w = wardCause(ctx, from, to);
     if (w) causes.push(w);
   }
 
   const items = itemTimingFacts(ctx, from, to);
   facts.push(...items.facts);
-  for (const c of items.lateCauses) causes.push({ code: "LATE_CORE_ITEM", severity: 30, text: c });
+  causes.push(...items.lateCauses);
 
   return { facts, causes, participated };
 }
@@ -665,33 +857,231 @@ function relevantStats(
   return stats;
 }
 
-function endStateLines(ctx: Ctx, position: number): string[] {
-  const { you, counterpart } = ctx;
+// ---- End-of-game comparison with the counterpart ----
+
+interface ComparisonRow {
+  key: string;
+  // Rows that say the same thing (kills, assists, kill share) share a group,
+  // so one "you fought a lot" doesn't fill every strength slot.
+  group?: string;
+  label: string;
+  you: number;
+  them: number;
+  lowerBetter?: boolean;
+  percent?: boolean;
+  // How big a gap has to be before it counts as one: 4 deaths against 5 or
+  // 436 GPM against 420 is noise, not a strength.
+  minGap: number;
+  minRatio: number;
+  // How a clear edge reads as a strength.
+  strength: (name: string) => string;
+}
+
+function teamKills(match: OpenDotaMatch, radiant: boolean): number {
+  return match.players.filter((p) => p.isRadiant === radiant).reduce((s, p) => s + p.kills, 0);
+}
+
+function killParticipation(match: OpenDotaMatch, p: OpenDotaMatchPlayer): number | null {
+  const team = teamKills(match, p.isRadiant);
+  return team >= 5 ? Math.round(((p.kills + p.assists) / team) * 100) : null;
+}
+
+function comparisonRows(ctx: Ctx, position: number): ComparisonRow[] {
+  const { you, counterpart, match } = ctx;
   if (!counterpart) return [];
-  const rows: [string, number, number, boolean?][] = [];
   const nw = (p: OpenDotaMatchPlayer) => p.net_worth ?? p.gold_spent + p.gold;
+  const rows: ComparisonRow[] = [
+    // Same bar as the phase verdicts, so the two never disagree.
+    { key: "net_worth", label: "Нетворс", you: nw(you), them: nw(counterpart), minGap: ctx.isCore ? 300 : 250, minRatio: 0.07, strength: (n) => `Ты закончил игру богаче, чем ${n}.` },
+  ];
   if (position <= 3) {
-    rows.push(["Нетворс", nw(you), nw(counterpart)]);
-    rows.push(["Золото в минуту", you.gold_per_min, counterpart.gold_per_min]);
-    rows.push(["Добивания", you.last_hits, counterpart.last_hits]);
-    rows.push(["Урон по башням", you.tower_damage, counterpart.tower_damage]);
-    if (position >= 2) rows.push(["Урон по героям", you.hero_damage, counterpart.hero_damage]);
+    rows.push(
+      { key: "gpm", label: "Золото в минуту", you: you.gold_per_min, them: counterpart.gold_per_min, minGap: 40, minRatio: 0.1, strength: (n) => `Ты фармил быстрее, чем ${n}.` },
+      { key: "last_hits", label: "Добивания", you: you.last_hits, them: counterpart.last_hits, minGap: 20, minRatio: 0.15, strength: (n) => `У тебя заметно больше добиваний, чем у ${n}.` },
+      { key: "tower_damage", label: "Урон по башням", you: you.tower_damage, them: counterpart.tower_damage, minGap: 1000, minRatio: 0.5, strength: (n) => `Ты давил на постройки сильнее, чем ${n}.` }
+    );
+    if (position >= 2) {
+      rows.push({ key: "hero_damage", label: "Урон по героям", you: you.hero_damage, them: counterpart.hero_damage, minGap: 3000, minRatio: 0.25, strength: (n) => `Ты нанёс героям заметно больше урона, чем ${n}.` });
+    }
   } else {
-    rows.push(["Нетворс", nw(you), nw(counterpart)]);
-    rows.push([
-      "Поставлено вардов",
-      (you.obs_placed ?? 0) + (you.sen_placed ?? 0),
-      (counterpart.obs_placed ?? 0) + (counterpart.sen_placed ?? 0),
-    ]);
+    rows.push(
+      { key: "wards", label: "Поставлено вардов", you: (you.obs_placed ?? 0) + (you.sen_placed ?? 0), them: (counterpart.obs_placed ?? 0) + (counterpart.sen_placed ?? 0), minGap: 3, minRatio: 0.3, strength: (n) => `Ты дал команде больше обзора, чем ${n}.` },
+      { key: "dewards", label: "Снято вражеских вардов", you: (you.observer_kills ?? 0) + (you.sentry_kills ?? 0), them: (counterpart.observer_kills ?? 0) + (counterpart.sentry_kills ?? 0), minGap: 2, minRatio: 0.5, strength: (n) => `Ты снял больше вражеских вардов, чем ${n}.` },
+      { key: "stacks", label: "Застакано лагерей", you: you.camps_stacked ?? 0, them: counterpart.camps_stacked ?? 0, minGap: 2, minRatio: 0.5, strength: (n) => `Ты застакал больше лагерей, чем ${n}.` }
+    );
   }
-  rows.push(["Киллы", you.kills, counterpart.kills]);
-  rows.push(["Смерти", you.deaths, counterpart.deaths, true]);
-  rows.push(["Помощи", you.assists, counterpart.assists]);
-  return rows.map(([label, a, b, lowerBetter]) => {
-    const better = lowerBetter ? a < b : a > b;
-    const verdict = a === b ? "ничья" : better ? "лучше" : "хуже";
-    return `${label}: ${vs(a, b)} - ${verdict}`;
-  });
+  rows.push(
+    { key: "kills", group: "kills", label: "Киллы", you: you.kills, them: counterpart.kills, minGap: 3, minRatio: 0.5, strength: (n) => `Ты убивал чаще, чем ${n}.` },
+    { key: "deaths", label: "Смерти", you: you.deaths, them: counterpart.deaths, lowerBetter: true, minGap: 3, minRatio: 0.4, strength: (n) => `Ты умирал заметно реже, чем ${n}.` },
+    { key: "assists", group: "kills", label: "Помощи", you: you.assists, them: counterpart.assists, minGap: 4, minRatio: 0.3, strength: (n) => `Ты помог в заметно большем числе убийств, чем ${n}.` }
+  );
+  const kpYou = killParticipation(match, you);
+  const kpThem = killParticipation(match, counterpart);
+  if (kpYou !== null && kpThem !== null) {
+    rows.push({ key: "kp", group: "kills", label: "Участие в убийствах команды", you: kpYou, them: kpThem, percent: true, minGap: 15, minRatio: 0, strength: (n) => `Ты участвовал в большей доле убийств своей команды, чем ${n}.` });
+  }
+  return rows;
+}
+
+function edge(row: ComparisonRow, forYou: boolean): boolean {
+  const [a, b] = forYou ? [row.you, row.them] : [row.them, row.you];
+  const gap = row.lowerBetter ? b - a : a - b;
+  return gap >= row.minGap && gap / Math.max(Math.abs(b), 1) >= row.minRatio;
+}
+
+function rowLine(row: ComparisonRow): string {
+  const verdict = edge(row, true) ? "лучше" : edge(row, false) ? "хуже" : "примерно наравне";
+  const values = row.percent
+    ? `ты ${row.you}% против ${row.them}% (${formatSigned(row.you - row.them)} п.п.)`
+    : vs(row.you, row.them);
+  return `${row.label}: ${values} - ${verdict}`;
+}
+
+// ---- Strengths ----
+
+interface RankedFinding extends CoachFinding {
+  weight: number;
+  // Same underlying stat: only the strongest finding per key is kept.
+  key: string;
+}
+
+const PERCENTILE_KEY: Record<string, string> = {
+  "Золото в минуту": "gpm",
+  "Опыт в минуту": "xpm",
+  "Добивания в минуту": "last_hits",
+  "Урон по героям в минуту": "hero_damage",
+  "Урон по башням": "tower_damage",
+  "Лечение в минуту": "healing",
+};
+
+function buildStrengths(args: {
+  ctx: Ctx;
+  phases: PhaseAnalysis[];
+  participationByPhase: Map<PhaseId, boolean>;
+  rows: ComparisonRow[];
+  stats: MetricPoint[];
+  youLeft: boolean;
+  // Strengths worked out elsewhere (the game's flow, positioning).
+  extra: RankedFinding[];
+}): CoachFinding[] {
+  const { ctx, phases, participationByPhase, rows, stats, youLeft } = args;
+  const name = ctx.counterpart ? getHeroName(ctx.counterpart.hero_id) : "соперник";
+  const found: RankedFinding[] = [...args.extra];
+
+  // Every won phase in one line - three cards saying "you won a phase" crowd
+  // out everything else the player did well.
+  const won = phases.filter((p) => p.verdict === "won");
+  if (won.length > 0) {
+    found.push({
+      key: "phases",
+      weight: 50 + won.length * 10,
+      point:
+        won.length === 1
+          ? `Ты выиграл фазу «${won[0].label}» у ${name} - врага на твоей позиции.`
+          : `Ты обошёл ${name}, врага на твоей позиции, по нетворсу в фазах ${won.map((p) => `«${p.label}»`).join(", ")}.`,
+      metric: won.map((p) => p.verdictBasis).join("; "),
+    });
+  }
+
+  for (const phase of phases) {
+    // ctx.deathDataComplete gates this for real: an incomplete death log can
+    // never support "0 deaths" as a claim, regardless of what any phase's
+    // facts happen to say - a missing death could be in any phase.
+    const hadNoDeaths =
+      ctx.deathDataComplete &&
+      phase.facts.some((f) => f === "Смертей в этой фазе не было." || f === "Смертей на линии не было.");
+    if (!hadNoDeaths) continue;
+    // A phase with 0 deaths is only worth praising when the verdict wasn't a
+    // loss, or - for mid/late - when there's real evidence this player was
+    // actually in the fights: 0 deaths from sitting out isn't survival, it's
+    // the same passivity problem the causes above already call out, and
+    // showing it as a strength would flatly contradict that same analysis.
+    const participated = participationByPhase.get(phase.id) ?? true;
+    const meaningful = phase.verdict !== "lost" || (phase.id !== "laning" && participated);
+    if (meaningful) {
+      found.push({
+        key: `alive:${phase.id}`,
+        weight: phase.id === "laning" ? 45 : 35,
+        point: `Ты ни разу не умер в фазе «${phase.label}».`,
+        metric: `${phase.label} ${phase.window}: 0 смертей`,
+      });
+    }
+  }
+
+  // Holding the lane even is a real result - laning against the same-position
+  // enemy without falling behind is what the rest of the game is built on.
+  const laning = phases.find((p) => p.id === "laning");
+  if (laning?.verdict === "even") {
+    found.push({ key: "lane-even", weight: 25, point: `Ты отстоял линию наравне с ${name}.`, metric: laning.verdictBasis });
+  }
+
+  // Being there when the team fights is the habit most games turn on.
+  const fights = ctx.fights.filter((f) => f.start < ctx.end);
+  const took = fights.filter((f) => f.you.participated);
+  if (fights.length >= 4 && took.length / fights.length >= 0.75) {
+    const killed = took.reduce((s, f) => s + f.enemyDeaths, 0);
+    const lost = took.reduce((s, f) => s + f.yourTeamDeaths, 0);
+    found.push({
+      key: "fights",
+      weight: 40,
+      point: `Ты был почти во всех драках команды - это то, что выигрывает игры.`,
+      metric: `Тимфайты: участвовал в ${took.length} из ${fights.length}; в них враг потерял ${heroesRu(killed)}, твоя команда - ${lost}`,
+    });
+  }
+
+  // Whole-game totals say nothing about a player who left partway.
+  if (!youLeft) {
+    for (const row of rows) {
+      if (row.key === "net_worth" && phases.length > 0) continue; // the phase verdicts already say it
+      if (!edge(row, true)) continue;
+      const ratio = Math.abs(row.you - row.them) / Math.max(row.them, 1);
+      found.push({ key: row.group ?? row.key, weight: 20 + Math.min(25, ratio * 40), point: row.strength(name), metric: rowLine(row) });
+    }
+    const kp = killParticipation(ctx.match, ctx.you);
+    if (kp !== null && kp >= 65) {
+      found.push({
+        key: "kills",
+        weight: 35,
+        point: "Ты участвовал в большинстве убийств своей команды.",
+        metric: `Участие в убийствах команды: (${ctx.you.kills} + ${ctx.you.assists}) из ${teamKills(ctx.match, ctx.you.isRadiant)} = ${kp}%`,
+      });
+    }
+    // A stat in the top quarter of everyone who plays this hero is a strength
+    // on its own, whatever the counterpart did.
+    for (const s of stats) {
+      if (s.percentile === undefined || s.percentile < 75) continue;
+      found.push({
+        key: PERCENTILE_KEY[s.label] ?? s.label,
+        weight: 20 + (s.percentile - 75),
+        point: `Показатель «${s.label.toLowerCase()}» - на уровне лучших ${Math.max(1, 100 - s.percentile)}% игроков на ${getHeroName(ctx.you.hero_id)}.`,
+        metric: `${s.label}: ${s.value}${s.unit ? ` ${s.unit}` : ""} (${s.percentile}-й перцентиль)`,
+      });
+    }
+  }
+
+  // Support: wards the enemy never found are wards placed where it matters.
+  if (!ctx.isCore) {
+    const fates = observerFates(ctx.match, ctx.you).filter((w) => w.time < ctx.end);
+    const dewarded = fates.filter((w) => w.dewardedBy !== null).length;
+    if (fates.length >= 4 && dewarded / fates.length <= 0.25) {
+      found.push({
+        key: "ward-survival",
+        weight: 35,
+        point: "Враг почти не находил твои Observer Ward - ты ставишь их туда, где их не ищут.",
+        metric: `Observer Ward: поставлено ${fates.length}, враг снял ${dewarded}`,
+      });
+    }
+  }
+
+  const best = new Map<string, RankedFinding>();
+  for (const f of found) {
+    const current = best.get(f.key);
+    if (!current || f.weight > current.weight) best.set(f.key, f);
+  }
+  return [...best.values()]
+    .sort((a, b) => b.weight - a.weight)
+    .slice(0, 4)
+    .map(({ point, metric }) => ({ point, metric }));
 }
 
 export function buildMatchAnalysis(args: {
@@ -701,6 +1091,8 @@ export function buildMatchAnalysis(args: {
   metrics: MatchMetrics;
   metaItemTiming: ItemProgressionPoint[];
   deathVision?: DeathVisionMoment[];
+  // Every hero's movement (STRATZ) - positioning in fights; null when missing.
+  positionTracks?: StratzPositionTrack[] | null;
 }): MatchAnalysis {
   const { match, accountId, positions, metrics, metaItemTiming } = args;
   const you = match.players.find((p) => p.account_id === accountId);
@@ -713,6 +1105,15 @@ export function buildMatchAnalysis(args: {
       (p) => p.isRadiant !== you.isRadiant && positions.bySlot.get(p.player_slot) === position
     ) ?? null;
 
+  const turbo = isTurbo(match.game_mode);
+  const bounds = turbo ? TURBO_BOUNDS : NORMAL_BOUNDS;
+  const context = buildGameContext(match, you, counterpart, bounds);
+  const yourLeave = context.leavers.find((l) => l.isYou);
+  const counterpartLeave = context.leavers.find((l) => l.isCounterpart && l.time !== null);
+  const teammateLeave = context.leavers.find((l) => l.yourTeam && !l.isYou && l.time !== null);
+  const enemyLeave = context.leavers.find((l) => !l.yourTeam && !l.isCounterpart && l.time !== null);
+  const end = yourLeave?.time != null ? Math.min(match.duration, yourLeave.time) : match.duration;
+
   const known = new Set<string>(["0:00"]);
   const time = (seconds: number) => {
     const label = formatMatchTime(seconds);
@@ -722,8 +1123,36 @@ export function buildMatchAnalysis(args: {
 
   const youIndex = match.players.indexOf(you);
   const counterpartIndex = counterpart ? match.players.indexOf(counterpart) : -1;
-  const lastMinute = Math.floor(match.duration / 60);
+  const lastMinute = Math.floor(end / 60);
   const deathData = collectDeaths(match, you, youIndex, metrics.deathLog, args.deathVision ?? []);
+
+  // The whole game and how the player stood in it - fed into the phases
+  // below and ranked against everything else.
+  const flowResult = buildGameFlow({
+    match,
+    you,
+    turbo,
+    isCore: role.isCore,
+    end,
+    laneEnd: bounds.laneEnd,
+    time,
+    teammateLeftAt: teammateLeave?.time ?? null,
+  });
+  const positioning = args.positionTracks
+    ? analysePositioning({ match, you, tracks: args.positionTracks, position, end, laneEnd: bounds.laneEnd, time })
+    : null;
+  const thrown = flowResult?.flow.kind === "throw";
+  // Causes about the whole game go to the phase where they happened (the
+  // first time they mention). In a thrown game they outrank everything: the
+  // lane is not what lost a game won by 15 000.
+  const gameCauses: Cause[] = [...(flowResult?.causes ?? []), ...(positioning?.causes ?? [])].map((c) => ({
+    ...c,
+    severity: c.severity + (thrown && flowResult!.causes.includes(c) ? 40 : 0),
+  }));
+  const anchorOf = (c: Cause): number => {
+    const m = c.text.match(/(\d{1,2}):(\d{2})/);
+    return m ? Number(m[1]) * 60 + Number(m[2]) : Number.POSITIVE_INFINITY;
+  };
 
   const ctx: Ctx = {
     match,
@@ -731,7 +1160,9 @@ export function buildMatchAnalysis(args: {
     counterpart,
     role,
     isCore: role.isCore,
-    deaths: deathData.events,
+    bounds,
+    end,
+    deaths: deathData.events.filter((d) => d.time < end),
     deathDataComplete: deathData.complete,
     realDeathTotal: deathData.realTotal,
     heroKills: (you.kills_log ?? []).map((k) => ({ time: k.time, victim: heroNameFromKey(match, k.key) })),
@@ -740,18 +1171,22 @@ export function buildMatchAnalysis(args: {
     metaItemTiming,
     metrics,
     time,
+    nearestAllyAtDeath: positioning?.nearestAllyAtDeath ?? new Map(),
+    whereDuringMissedFight: positioning?.whereDuringMissedFight ?? new Map(),
   };
 
-  const netWorth = CHECKPOINT_MINUTES.filter((m) => m <= lastMinute)
+  // No comparison with a counterpart past the minute they left: their items
+  // are sold and their net worth is meaningless from there.
+  const comparableUntil = counterpartLeave?.time ?? Infinity;
+  const netWorth = CHECKPOINT_MINUTES.filter((m) => m <= lastMinute && m * 60 <= comparableUntil)
     .map((m) => checkpointAt(ctx, m))
     .filter((c): c is NetWorthCheckpoint => c !== null);
   for (const c of netWorth) time(c.minute * 60);
 
-  const teamAdvantage = (minute: number): string | null => {
+  const teamAdvantageAt = (minute: number): number | null => {
     const adv = at(match.radiant_gold_adv, minute);
     if (adv === null) return null;
-    const yours = you.isRadiant ? adv : -adv;
-    return `Общее золотое преимущество твоей команды на ${time(minute * 60)}: ${formatSigned(yours)}${yours < 0 ? " (отстаёт)" : " (впереди)"}.`;
+    return you.isRadiant ? adv : -adv;
   };
 
   const phases: PhaseAnalysis[] = [];
@@ -766,23 +1201,60 @@ export function buildMatchAnalysis(args: {
   // and the coach report falls back to end-of-game stats only, same as a
   // match with no parsed timeline always has.
   const hasTimelineData = (you.networth_t?.length ?? 0) > 0;
-  for (const def of hasTimelineData ? PHASE_DEFS : []) {
-    if (match.duration < def.from + MIN_PHASE_SECONDS) continue;
-    const to = Math.min(def.to, match.duration);
+  const defs: { id: PhaseId; label: string; from: number; to: number }[] = [
+    { id: "laning", label: "Линия", from: 0, to: bounds.laneEnd },
+    { id: "midGame", label: "Мидгейм", from: bounds.laneEnd, to: bounds.midEnd },
+    { id: "lateGame", label: "Лейтгейм", from: bounds.midEnd, to: Number.POSITIVE_INFINITY },
+  ];
+  if (end - bounds.midEnd < bounds.minLate) {
+    defs[1].to = Number.POSITIVE_INFINITY;
+    defs.pop();
+  }
+
+  for (const def of hasTimelineData ? defs : []) {
+    if (end < def.from + MIN_PHASE_SECONDS) continue;
+    const to = Math.min(def.to, end);
     const endMin = Math.min(Math.floor(to / 60), lastMinute);
     const startMin = Math.floor(def.from / 60);
-    const endCp = checkpointAt(ctx, endMin);
-    const startCp = def.from > 0 ? checkpointAt(ctx, startMin) : null;
+    const counterpartGone = to > comparableUntil + 60;
+    const phaseCtx: Ctx = counterpartGone ? { ...ctx, counterpart: null } : ctx;
+    const endCp = checkpointAt(phaseCtx, endMin);
+    const startCp = def.from > 0 ? checkpointAt(phaseCtx, startMin) : null;
+
+    const teamAdv = teamAdvantageAt(endMin);
+    const teammateGone = teammateLeave?.time != null && teammateLeave.time < to;
+    const situation: PhaseSituation = {
+      farBehind: (teamAdv !== null && teamAdv <= -bounds.farBehind) || teammateGone,
+    };
 
     const built =
       def.id === "laning"
-        ? buildLaning(ctx, def.from, to)
-        : buildMidLate(ctx, def.id, def.from, to, startCp, endCp);
+        ? buildLaning(phaseCtx, def.from, to)
+        : buildMidLate(phaseCtx, def.id, def.from, to, startCp, endCp, situation);
 
     const facts: string[] = [];
-    if (endCp) facts.push(`Нетворс на ${time(endMin * 60)} против ${counterpart ? getHeroName(counterpart.hero_id) : "соперника"}: ${vs(endCp.you, endCp.counterpart)}.`);
-    const team = teamAdvantage(endMin);
-    if (team) facts.push(team);
+    const counterpartName = counterpart ? getHeroName(counterpart.hero_id) : "соперника";
+    if (endCp) facts.push(`Нетворс на ${time(endMin * 60)} против ${counterpartName}: ${vs(endCp.you, endCp.counterpart)}.`);
+    if (teamAdv !== null) {
+      facts.push(`Общее золотое преимущество твоей команды на ${time(endMin * 60)}: ${formatSigned(teamAdv)}${teamAdv < 0 ? " (отстаёт)" : " (впереди)"}.`);
+      if (def.id !== "laning" && teamAdv <= -bounds.farBehind) {
+        const baseUnderSiege = towersIn(match, def.from, to, you.isRadiant).barracksLost.length > 0;
+        facts.push(
+          `Ситуация фазы: твоя команда сильно отставала по золоту${baseUnderSiege ? " и защищала свою базу" : ""} - это была фаза обороны, а не атаки.`
+        );
+      } else if (def.id !== "laning" && teamAdv >= bounds.farBehind) {
+        facts.push("Ситуация фазы: твоя команда уверенно вела по золоту.");
+      }
+    }
+    if (teammateGone) {
+      facts.push(`С ${time(teammateLeave!.time!)} твоя команда играла вчетвером: ${teammateLeave!.heroName} покинул игру.`);
+    }
+    if (enemyLeave?.time != null && enemyLeave.time < to) {
+      facts.push(`С ${time(enemyLeave.time)} враг играл вчетвером: ${enemyLeave.heroName} покинул игру.`);
+    }
+    if (counterpartGone) {
+      facts.push(`${counterpartName}, соперник на твоей позиции, покинул игру в ${time(comparableUntil)} - сравнения с ним в этой фазе нет.`);
+    }
     if (def.id === "laning") {
       const laneDeaths = ctx.deaths.filter((d) => d.time < to);
       if (laneDeaths.length > 0) {
@@ -797,32 +1269,47 @@ export function buildMatchAnalysis(args: {
       const laneKills = ctx.heroKills.filter((k) => k.time < to);
       if (laneKills.length > 0) facts.push(`Твои килы героев: ${laneKills.length} (${laneKills.map((k) => `${time(k.time)} ${k.victim}`).join("; ")}).`);
       const items = itemTimingFacts(ctx, def.from, to);
-      facts.push(...built.facts, ...(ctx.isCore ? [] : wardFacts(ctx, def.from, to)), ...items.facts);
-      const w = wardCause(ctx, def.from, to);
-      if (w) built.causes.push(w);
-      for (const c of items.lateCauses) built.causes.push({ code: "LATE_CORE_ITEM", severity: 25, text: c });
+      facts.push(...built.facts, ...items.facts);
+      built.causes.push(...items.lateCauses.map((c) => ({ ...c, severity: 25 })));
+      if (!ctx.isCore) {
+        const wards = wardFacts(ctx, def.from, to);
+        facts.push(...wards.facts);
+        built.causes.push(...wards.causes);
+        const w = wardCause(ctx, def.from, to);
+        if (w) built.causes.push(w);
+      }
     } else {
       facts.push(...built.facts);
     }
     participationByPhase.set(def.id, built.participated);
+    const lastPhase = def === defs[defs.length - 1] || to >= end;
+    built.causes.push(
+      ...gameCauses.filter((c) => {
+        const t = anchorOf(c);
+        return (t >= def.from && t < to) || (lastPhase && t >= to);
+      })
+    );
+
+    const top = built.causes.sort((a, b) => b.severity - a.severity).slice(0, 4);
+    allCauses.push(...top);
+    const principles = [
+      ...new Set(top.map((c) => principleFor(c.code, position)).filter((x): x is string => x !== null)),
+    ].slice(0, 2);
+    const verdict = counterpartGone ? null : decideVerdict(endCp, ctx.isCore);
 
     phases.push({
       id: def.id,
       label: def.label,
       window: `${time(def.from)}-${time(to)}`,
-      verdict: decideVerdict(endCp, ctx.isCore),
-      verdictBasis: endCp
-        ? `нетворс на ${time(endMin * 60)}: ${vs(endCp.you, endCp.counterpart)}`
-        : "нет данных по нетворсу за эту фазу",
+      verdict,
+      verdictBasis: counterpartGone
+        ? `${counterpartName} покинул игру в ${time(comparableUntil)} - сравнения нет`
+        : endCp
+          ? `нетворс на ${time(endMin * 60)}: ${vs(endCp.you, endCp.counterpart)}`
+          : "нет данных по нетворсу за эту фазу",
       facts,
-      ...(() => {
-        const top = built.causes.sort((a, b) => b.severity - a.severity).slice(0, 4);
-        allCauses.push(...top);
-        const principles = [
-          ...new Set(top.map((c) => principleFor(c.code, position)).filter((x): x is string => x !== null)),
-        ].slice(0, 2);
-        return { causes: top.map((c) => c.text), principles };
-      })(),
+      causes: top.map((c) => c.text),
+      principles,
     });
   }
 
@@ -840,52 +1327,25 @@ export function buildMatchAnalysis(args: {
     const advice = principleFor(cause.code, position);
     if (!advice) continue;
     seenCodes.add(cause.code);
-    priorities.push({ point: advice, metric: cause.text });
+    priorities.push({ point: advice, metric: cause.text, ...(cause.target ? { target: cause.target } : {}) });
     if (priorities.length === 3) break;
   }
 
-  const strengths: CoachFinding[] = [];
-  for (const phase of phases) {
-    if (phase.verdict === "won") {
-      strengths.push({ point: `Ты выиграл фазу «${phase.label}» у соперника на твоей позиции.`, metric: phase.verdictBasis });
-      continue;
-    }
-    // ctx.deathDataComplete gates this for real: an incomplete death log can
-    // never support "0 deaths" as a claim, regardless of what any phase's
-    // facts happen to say - a missing death could be in any phase.
-    const hadNoDeaths = ctx.deathDataComplete && phase.facts.some((f) => f === "Смертей в этой фазе не было." || f === "Смертей на линии не было.");
-    if (!hadNoDeaths) continue;
-    // A phase with 0 deaths is only worth praising when the verdict wasn't a
-    // loss, or - for mid/late - when there's real evidence this player was
-    // actually in the fights: 0 deaths from sitting out isn't survival, it's
-    // the same passivity problem the causes above already call out, and
-    // showing it as a strength would flatly contradict that same analysis.
-    const participated = participationByPhase.get(phase.id) ?? true;
-    const meaningful = phase.verdict !== "lost" || (phase.id !== "laning" && participated);
-    if (meaningful) {
-      strengths.push({ point: `Ты ни разу не умер в фазе «${phase.label}».`, metric: `${phase.label} ${phase.window}: 0 смертей` });
-    }
-  }
-  for (const line of endStateLines(ctx, position)) {
-    if (!line.endsWith("- лучше")) continue;
-    const label = line.split(":")[0].toLowerCase();
-    strengths.push({ point: `Ты обошёл соперника по показателю «${label}».`, metric: line });
-  }
-  // Holding the lane even is a real result - laning against the same-position
-  // enemy without falling behind is what the rest of the game is built on.
-  const laning = phases.find((p) => p.id === "laning");
-  if (laning?.verdict === "even") {
-    strengths.push({ point: "Ты отстоял линию наравне с соперником на твоей позиции.", metric: laning.verdictBasis });
-  }
-  // A stat in the top quarter of everyone who plays this hero is a strength
-  // on its own, whatever the counterpart did.
-  for (const s of relevantStats(metrics, role, you.hero_id, you)) {
-    if (s.percentile === undefined || s.percentile < 75) continue;
-    strengths.push({
-      point: `Показатель «${s.label.toLowerCase()}» - на уровне лучших ${Math.max(1, 100 - s.percentile)}% игроков на ${getHeroName(you.hero_id)}.`,
-      metric: `${s.label}: ${s.value}${s.unit ? ` ${s.unit}` : ""} (${s.percentile}-й перцентиль)`,
-    });
-  }
+  // Whole-game comparisons stop meaning anything once either side left.
+  const rows = yourLeave || context.leavers.some((l) => l.isCounterpart) ? [] : comparisonRows(ctx, position);
+  const stats = relevantStats(metrics, role, you.hero_id, you);
+  const strengths = buildStrengths({
+    ctx,
+    phases,
+    participationByPhase,
+    rows,
+    stats,
+    youLeft: Boolean(yourLeave),
+    extra: [
+      ...(flowResult?.strengths ?? []).map((f) => ({ ...f, key: "comeback", weight: 55 })),
+      ...(positioning?.strengths ?? []).map((f) => ({ ...f, key: "positioning", weight: 38 })),
+    ],
+  });
 
   const killerCounts = new Map<string, { heroId: number; count: number }>();
   for (const d of ctx.deaths) {
@@ -906,6 +1366,7 @@ export function buildMatchAnalysis(args: {
     if (key) knownItems.add(getItemNameByKey(key));
   }
   for (const m of metaItemTiming) knownItems.add(getItemNameByKey(m.itemKey));
+  for (const l of context.leavers) if (l.time !== null) time(l.time);
 
   return {
     matchId: match.match_id,
@@ -920,13 +1381,19 @@ export function buildMatchAnalysis(args: {
     laneSummary,
     netWorth,
     phases,
-    endStateVsCounterpart: endStateLines(ctx, position),
-    stats: relevantStats(metrics, role, you.hero_id, you),
+    endStateVsCounterpart: rows.map(rowLine),
+    // Whole-game totals of a player who left are mostly time spent gone.
+    stats: yourLeave ? [] : stats,
     knownTimes: [...known],
     repeatKillers,
     knownItems: [...knownItems],
-    strengths: strengths.slice(0, 4),
+    strengths,
     priorities,
     buybacksUsed: (you.buyback_log ?? []).length || metrics.buybacks,
+    context,
+    deathTimes: ctx.deaths.map((d) => d.time),
+    gameFlow: flowResult
+      ? { ...flowResult.flow, facts: [...flowResult.flow.facts, ...(positioning?.facts ?? [])] }
+      : null,
   };
 }

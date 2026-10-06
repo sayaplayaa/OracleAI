@@ -9,6 +9,8 @@ import type {
 } from "@/lib/types";
 import { formatSigned } from "@/lib/format";
 import { DeathVisionMap } from "./DeathVisionMap";
+import { GameContextNotice } from "./SimpleReport";
+import { GameFlowCard } from "./GameFlowCard";
 
 export function FindingList({
   title,
@@ -41,6 +43,11 @@ export function FindingList({
           >
             <p className="text-sm text-ink leading-relaxed">{f.point}</p>
             <p className="text-xs text-ink-muted mt-1 font-mono leading-relaxed">{f.metric}</p>
+            {f.target && (
+              <p className="text-xs text-accent mt-1.5 leading-relaxed">
+                <span className="font-semibold">Цель на следующую игру:</span> {f.target}
+              </p>
+            )}
           </li>
         ))}
       </ul>
@@ -242,6 +249,7 @@ export function CoachReport({ report }: { report: CoachReportType }) {
 
   return (
     <div className="@container space-y-4 rise-in">
+      <GameContextNotice context={report.context} />
       <section
         className="bg-surface border border-border rounded-2xl p-5"
         style={{ boxShadow: "inset 4px 0 0 0 var(--color-accent)" }}
@@ -249,6 +257,8 @@ export function CoachReport({ report }: { report: CoachReportType }) {
         <Label accent>Итог от ИИ-тренера</Label>
         <p className="font-display font-medium text-base @xl:text-lg text-ink leading-snug">{report.summary}</p>
       </section>
+
+      {report.gameFlow && <GameFlowCard flow={report.gameFlow} />}
 
       {lists.length > 0 && (
         <div className={`grid gap-4 items-start ${lists.length >= 2 ? "@2xl:grid-cols-2" : ""} ${lists.length >= 3 ? "@5xl:grid-cols-3" : ""}`}>
