@@ -75,6 +75,21 @@ export function getItemNameByKey(key: string): string {
   return itemsByKey[key]?.dname ?? key;
 }
 
+export function getItemCostByKey(key: string): number {
+  return itemsByKey[key]?.cost ?? 0;
+}
+
+/** An item built from components (Manta Style, Power Treads) rather than a component itself. */
+export function isAssembledItem(key: string): boolean {
+  const components = (itemsByKey[key] as { components?: string[] | null } | undefined)?.components;
+  return Array.isArray(components) && components.length > 0;
+}
+
+/** An ability's in-game (English) name by its internal key, e.g. "lina_laguna_blade" -> "Laguna Blade". */
+export function getAbilityDisplayNameByKey(key: string): string | null {
+  return (abilities as unknown as Record<string, { dname?: string }>)[key]?.dname ?? null;
+}
+
 export function getItemIconByKey(key: string): string {
   const item = itemsByKey[key];
   return item ? `${CDN_BASE}${item.img}` : "";

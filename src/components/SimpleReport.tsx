@@ -8,6 +8,7 @@ import type {
   PhaseVerdict,
 } from "@/lib/types";
 import { DeathVisionMap } from "./DeathVisionMap";
+import { FullBreakdown } from "./FullBreakdown";
 import { GameFlowCard } from "./GameFlowCard";
 import { NetWorthDiffChart } from "./NetWorthDiffChart";
 
@@ -129,10 +130,22 @@ function ImprovementsColumn({ tips }: { tips: CoachFinding[] }) {
                   <Label>Что случилось</Label>
                   <p className="text-sm text-ink-secondary leading-relaxed">{tip.metric}</p>
                 </div>
+                {tip.why && (
+                  <div>
+                    <Label>Почему это ошибка</Label>
+                    <p className="text-sm text-ink leading-relaxed">{tip.why}</p>
+                  </div>
+                )}
                 <div>
-                  <Label accent>Как исправить</Label>
-                  <p className="text-sm text-ink leading-relaxed">{tip.point}</p>
+                  <Label accent>{tip.correct ? "Как было правильно" : "Как исправить"}</Label>
+                  <p className="text-sm text-ink leading-relaxed">{tip.correct || tip.point}</p>
                 </div>
+                {tip.example && (
+                  <div>
+                    <Label>Пример на следующую игру</Label>
+                    <p className="text-sm text-ink-secondary leading-relaxed">{tip.example}</p>
+                  </div>
+                )}
                 {tip.target && (
                   <div className="rounded-lg border border-accent/30 bg-accent/8 px-3 py-2">
                     <Label accent>Цель на следующую игру</Label>
@@ -337,6 +350,8 @@ export function SimpleReport({
           </ol>
         </section>
       )}
+
+      {report.breakdown && <FullBreakdown breakdown={report.breakdown} counterpart={comparison?.counterpartHero} />}
 
       {deaths.length > 0 && (
         <section>

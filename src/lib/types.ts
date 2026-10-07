@@ -159,6 +159,19 @@ export interface OpenDotaMatchPlayer {
   >;
   // e.g. {"3": 2, "4": 1} = two triple-kills and one rampage.
   multi_kills?: Record<string, number>;
+  // Cumulative hero damage at each minute mark.
+  hero_damage_t?: number[];
+  // Gold earned by source (Valve's reason codes: 11 buildings, 12 heroes,
+  // 13 lane creeps, 14 neutrals, 15 Roshan, 17 bounty runes; 1 = lost on death).
+  gold_reasons?: Record<string, number>;
+  // Damage taken from each enemy ability/item ("null" = right-click attacks).
+  damage_inflictor_received?: Record<string, number>;
+  // Times killed by each unit (hero internal name).
+  killed_by?: Record<string, number>;
+  lane_kills?: number;
+  neutral_kills?: number;
+  ancient_kills?: number;
+  rune_pickups?: number;
 }
 
 export interface OpenDotaObjective {
@@ -501,6 +514,12 @@ export interface CoachFinding {
   // A measurable goal for the next game, worked out in code from this game's
   // real numbers (e.g. "0 смертей до 10:00 (в этой игре - 3)").
   target?: string;
+  // Single-match priorities only, worked out in code: why it cost the game
+  // something, the right move in that exact situation, and how it looks in
+  // the next game.
+  why?: string;
+  correct?: string;
+  example?: string;
 }
 
 // A real chronological moment (a death, a teamfight, an item timing) from a
@@ -691,6 +710,114 @@ export interface MatchAnalysis {
   deathTimes: number[];
   // Null when the replay has no team gold curve.
   gameFlow: GameFlow | null;
+  // Every aspect of the game broken down in code; null without a parsed replay.
+  breakdown: MatchBreakdown | null;
+}
+
+// ---- Full breakdown: every aspect of one game, worked out in code ----
+
+export type BreakdownAspectId = "laning" | "farm" | "deaths" | "fights" | "items" | "vision" | "objectives";
+
+export type MistakeSeverity = "high" | "medium" | "low";
+
+// One mistake, explained the way a coach reviewing the replay would: what
+// the replay shows, why it cost something, what the right move was in that
+// exact spot, and how it looks in the next game.
+export interface BreakdownMistake {
+  code: string;
+  severity: MistakeSeverity;
+  phase: PhaseId | null;
+  // Time label of the moment it's about, when there is one.
+  time: string | null;
+  title: string;
+  whatHappened: string;
+  why: string;
+  correct: string;
+  example: string;
+  target?: string;
+}
+
+// One row of an aspect's table: the player, the enemy on the same position,
+// and a reference (the median player on this hero, or the game's own bar).
+export interface BreakdownStat {
+  label: string;
+  you: string;
+  counterpart?: string;
+  reference?: string;
+  tone?: "good" | "bad" | "neutral";
+}
+
+export interface BreakdownAspect {
+  id: BreakdownAspectId;
+  title: string;
+  grade: "good" | "ok" | "bad";
+  // One line: how this part of the game went.
+  summary: string;
+  stats: BreakdownStat[];
+  good: string[];
+  // Facts that aren't a mistake or a strength but belong to the picture.
+  notes: string[];
+  mistakes: BreakdownMistake[];
+}
+
+// Every death of the player, one by one.
+export interface DeathReview {
+  time: number;
+  timeLabel: string;
+  // mistake: avoidable; fight: died in a fight the team lost or drew;
+  // trade: died in a fight the team won - a fair price.
+  verdict: "mistake" | "fight" | "trade";
+  title: string;
+  // Everything the replay says about it.
+  facts: string[];
+  why: string | null;
+  correct: string | null;
+  example: string | null;
+}
+
+// Every teamfight of the game and what the player did in it.
+export interface FightReview {
+  time: number;
+  timeLabel: string;
+  place: string | null;
+  result: "won" | "lost" | "even";
+  yourTeamDeaths: number;
+  enemyDeaths: number;
+  leadBefore: number | null;
+  leadAfter: number | null;
+  // One phrase: what the player did ("участвовал и выжил").
+  you: string;
+  tone: "good" | "bad" | "neutral";
+  facts: string[];
+  // What the right play was, when the player's part was a mistake.
+  correct: string | null;
+}
+
+export type TimelineEventKind =
+  | "kill"
+  | "death"
+  | "item"
+  | "level"
+  | "fight"
+  | "building"
+  | "roshan"
+  | "buyback"
+  | "rune"
+  | "firstblood";
+
+export interface TimelineEvent {
+  time: number;
+  timeLabel: string;
+  kind: TimelineEventKind;
+  text: string;
+  tone: "good" | "bad" | "neutral";
+}
+
+export interface MatchBreakdown {
+  aspects: BreakdownAspect[];
+  deaths: DeathReview[];
+  fights: FightReview[];
+  timeline: TimelineEvent[];
 }
 
 export interface CoachPhaseReport {
@@ -729,6 +856,8 @@ export interface CoachReport {
   context?: GameContext;
   // Single-match report only: how the whole game went and what decided it.
   gameFlow?: GameFlow;
+  // Single-match report only: every aspect of the game, worked out in code.
+  breakdown?: MatchBreakdown;
   strengths: CoachFinding[];
   weaknesses: CoachFinding[];
   tips: CoachFinding[];

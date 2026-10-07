@@ -1,7 +1,9 @@
 import { formatGold, pluralRu } from "../format";
+import { frontPositioningAdvice } from "../coach/advice";
+import { roleGroupOf } from "../coach/principles";
 import type { StratzPositionTrack } from "../stratz";
 import type { CoachFinding, OpenDotaMatch, OpenDotaMatchPlayer } from "../types";
-import type { FlowCause } from "./gameFlow";
+import type { Cause } from "./cause";
 import { deathTimesOf } from "./gameFlow";
 import { classifyZone, positionCells } from "./mapZones";
 
@@ -14,9 +16,10 @@ const ISOLATED_UNITS = 2000;
 // first hero the enemy can reach.
 const FRONT_MARGIN_UNITS = 150;
 
-type Point = { x: number; y: number };
+export type Point = { x: number; y: number };
 
-function positionAt(track: StratzPositionTrack | undefined, time: number): Point | null {
+/** Where a hero was at a moment: the last recorded point before it. */
+export function positionAt(track: StratzPositionTrack | undefined, time: number): Point | null {
   const pts = track?.points;
   if (!pts || pts.length === 0 || pts[0].time > time) return null;
   let lo = 0;
@@ -29,7 +32,8 @@ function positionAt(track: StratzPositionTrack | undefined, time: number): Point
   return pts[lo];
 }
 
-function units(a: Point, b: Point): number {
+/** Distance in game units between two grid points. */
+export function units(a: Point, b: Point): number {
   return Math.hypot(a.x - b.x, a.y - b.y) * UNITS_PER_CELL;
 }
 
@@ -47,12 +51,14 @@ function took(fp: Teamfight["players"][number] | undefined): boolean {
 
 export interface PositioningResult {
   facts: string[];
-  causes: FlowCause[];
+  causes: Cause[];
   strengths: CoachFinding[];
   // Death time -> distance (game units) to the nearest living ally.
   nearestAllyAtDeath: Map<number, number>;
   // Fight start -> where the player was instead.
   whereDuringMissedFight: Map<number, string>;
+  // Starts of the fights in which the player was the team's closest hero to the enemy.
+  frontAt: Set<number>;
 }
 
 /**
@@ -79,6 +85,7 @@ export function analysePositioning(args: {
     strengths: [],
     nearestAllyAtDeath: new Map(),
     whereDuringMissedFight: new Map(),
+    frontAt: new Set(),
   };
   const yourTrack = trackOf(you);
   if (!yourTrack) return result;
@@ -123,7 +130,9 @@ export function analysePositioning(args: {
     if (mine === null || others.length < 2) continue;
     checked++;
     const youDied = f.players[idx(you)]?.deaths > 0;
-    if (mine + FRONT_MARGIN_UNITS < Math.min(...others) && youDied) frontAndDied.push(t);
+    const front = mine + FRONT_MARGIN_UNITS < Math.min(...others);
+    if (front) result.frontAt.add(t);
+    if (front && youDied) frontAndDied.push(t);
   }
 
   // An initiator (position 3) is meant to be the first hero the enemy meets.
@@ -134,6 +143,7 @@ export function analysePositioning(args: {
         severity: 35 + frontAndDied.length * 10,
         text: `В начале драк ${frontAndDied.map((t) => time(t)).join(", ")} ты стоял ближе всех из команды к врагу - и погибал в них: враг доставал тебя раньше, чем остальных.`,
         target: `ни разу не стоять ближе всех к врагу в начале драки (в этой игре - ${frontAndDied.length} ${pluralRu(frontAndDied.length, ["раз", "раза", "раз"])})`,
+        ...frontPositioningAdvice({ group: roleGroupOf(position), times: frontAndDied.map((t) => time(t)) }),
       });
     } else if (frontAndDied.length === 0 && checked >= 3) {
       result.strengths.push({

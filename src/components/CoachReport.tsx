@@ -9,6 +9,7 @@ import type {
 } from "@/lib/types";
 import { formatSigned } from "@/lib/format";
 import { DeathVisionMap } from "./DeathVisionMap";
+import { FullBreakdown } from "./FullBreakdown";
 import { GameContextNotice } from "./SimpleReport";
 import { GameFlowCard } from "./GameFlowCard";
 
@@ -41,8 +42,18 @@ export function FindingList({
             className="rounded-xl bg-page/50 border border-border px-3.5 py-3"
             style={{ boxShadow: `inset 2px 0 0 0 ${accent}` }}
           >
-            <p className="text-sm text-ink leading-relaxed">{f.point}</p>
+            <p className="text-sm text-ink leading-relaxed">{f.correct || f.point}</p>
             <p className="text-xs text-ink-muted mt-1 font-mono leading-relaxed">{f.metric}</p>
+            {f.why && (
+              <p className="text-xs text-ink-secondary mt-1.5 leading-relaxed">
+                <span className="font-semibold">Почему это ошибка:</span> {f.why}
+              </p>
+            )}
+            {f.example && (
+              <p className="text-xs text-ink-secondary mt-1.5 leading-relaxed">
+                <span className="font-semibold">Пример:</span> {f.example}
+              </p>
+            )}
             {f.target && (
               <p className="text-xs text-accent mt-1.5 leading-relaxed">
                 <span className="font-semibold">Цель на следующую игру:</span> {f.target}
@@ -277,6 +288,20 @@ export function CoachReport({ report }: { report: CoachReportType }) {
       )}
 
       <KeyMomentsTimeline report={report} />
+
+      {report.breakdown && (
+        <details className="group">
+          <summary className="cursor-pointer select-none rounded-2xl border border-border bg-surface px-5 py-4 text-sm font-semibold text-ink hover:border-accent/60 transition">
+            Полный разбор игры: каждая ошибка, смерть и драка
+            <span className="ml-2 text-ink-muted font-normal">
+              ({report.breakdown.aspects.reduce((s, a) => s + a.mistakes.length, 0)} ошибок)
+            </span>
+          </summary>
+          <div className="mt-4">
+            <FullBreakdown breakdown={report.breakdown} counterpart={report.comparison?.counterpartHero} />
+          </div>
+        </details>
+      )}
 
       {report.deathVision && report.deathVision.length > 0 && <DeathVisionMap moments={report.deathVision} />}
 

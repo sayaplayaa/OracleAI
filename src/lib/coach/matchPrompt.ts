@@ -82,64 +82,96 @@ export function buildMatchCoachPrompt(analysis: MatchAnalysis): string {
     return `- ${k.heroName} (убил тебя ${k.count} раз): ${abilities.join(", ")}`;
   });
 
-  const parts: string[] = [
-    ...(analysis.context.notes.length > 0
-      ? [`Контекст игры:\n${analysis.context.notes.map((n) => `- ${n}`).join("\n")}`]
-      : []),
-    `Матч ${analysis.matchId}: ${analysis.heroName}, роль - ${analysis.positionLabel} (${POSITION_SOURCE_NOTE[analysis.positionSource]}). Матч ${analysis.win ? "ВЫИГРАН" : "ПРОИГРАН"}, длительность ${formatMatchTime(analysis.durationSeconds)}.`,
+  // Each section with how much the report loses without it (0 = never
+  // dropped). Sections are dropped from the least important up until the
+  // prompt fits the model's window - see fitToWindow.
+  const sections: { text: string; drop: number }[] = [];
+  const add = (text: string, drop = 0) => sections.push({ text, drop });
+
+  if (analysis.context.notes.length > 0) add(`Контекст игры:\n${analysis.context.notes.map((n) => `- ${n}`).join("\n")}`);
+  add(
+    `Матч ${analysis.matchId}: ${analysis.heroName}, роль - ${analysis.positionLabel} (${POSITION_SOURCE_NOTE[analysis.positionSource]}). Матч ${analysis.win ? "ВЫИГРАН" : "ПРОИГРАН"}, длительность ${formatMatchTime(analysis.durationSeconds)}.`
+  );
+  add(
     analysis.counterpart
       ? `Соперник на той же позиции: ${analysis.counterpart.heroName}.`
-      : "Соперника на той же позиции определить не удалось.",
-    analysis.laneSummary,
-  ];
+      : "Соперника на той же позиции определить не удалось."
+  );
+  add(analysis.laneSummary, 3);
 
   if (analysis.gameFlow) {
-    parts.push(`Ход игры (вся игра, а не одна фаза):\n${analysis.gameFlow.facts.map((f) => `- ${f}`).join("\n")}`);
+    add(`Ход игры (вся игра, а не одна фаза):\n${analysis.gameFlow.facts.map((f) => `- ${f}`).join("\n")}`);
   }
 
+  // The phases already give net worth at their ends; the full series is extra.
   if (analysis.netWorth.length > 0) {
-    parts.push(
+    add(
       `Нетворс против соперника по минутам: ${analysis.netWorth
         .map((c) => `${c.minute}:00 ты ${formatGold(c.you)} против ${formatGold(c.counterpart)}`)
-        .join(" | ")}`
+        .join(" | ")}`,
+      6
     );
   }
 
   if (analysis.phases.length > 0) {
-    parts.push(analysis.phases.map(formatPhase).join("\n\n"));
+    add(analysis.phases.map(formatPhase).join("\n\n"));
   } else {
-    parts.push(
+    add(
       "У этого матча нет разобранного реплея, поэтому данных по фазам нет. Строй отчёт только на итоговом сравнении и скажи об этом в итоге; не придумывай события."
     );
   }
 
   if (analysis.endStateVsCounterpart.length > 0) {
-    parts.push(`Итог матча против соперника:\n${analysis.endStateVsCounterpart.map((l) => `- ${l}`).join("\n")}`);
+    // Without phases this is all there is to go on.
+    add(`Итог матча против соперника:\n${analysis.endStateVsCounterpart.map((l) => `- ${l}`).join("\n")}`, analysis.phases.length > 0 ? 2 : 0);
   }
 
   if (analysis.stats.length > 0) {
-    parts.push(
+    add(
       `Итоговые показатели, важные для роли (перцентиль - среди всех игроков на этом герое):\n${analysis.stats
         .map((s) => `- ${s.label}: ${s.value}${s.unit ? ` ${s.unit}` : ""}${s.percentile !== undefined ? ` (${s.percentile}-й перцентиль)` : ""}`)
-        .join("\n")}`
+        .join("\n")}`,
+      analysis.phases.length > 0 ? 5 : 0
     );
   }
 
   if (analysis.priorities.length > 0) {
-    parts.push(`Главная проблема по данным (уже проверена): ${analysis.priorities[0].metric}`);
+    add(`Главная проблема по данным (уже проверена): ${analysis.priorities[0].metric}`);
   }
 
-  parts.push(`Способности героя ${analysis.heroName}: ${kit.join(", ")}. Упоминай только способности из этого списка.`);
+  add(`Способности героя ${analysis.heroName}: ${kit.join(", ")}. Упоминай только способности из этого списка.`, 1);
   if (killerLines.length > 0) {
-    parts.push(`Герои, которые убивали тебя несколько раз, и их способности:\n${killerLines.join("\n")}`);
+    add(`Герои, которые убивали тебя несколько раз, и их способности:\n${killerLines.join("\n")}`, 4);
   }
 
-  parts.push(
+  add(
     analysis.phases.length > 0
       ? `Напиши по одной записи на каждую фазу в порядке выше (${analysis.phases.map((p) => `${p.id} = ${p.label}`).join(", ")}) и итог из 2-3 предложений, обращённый прямо к игроку на «ты» (никогда «игрок» или имя героя в третьем лице). Всё - на русском языке. Отправь отчёт инструментом submit_match_coaching_report.`
       : "Напиши короткий итог, до 3 сильных сторон для этой роли и 2-4 приоритета на следующую игру - всё на русском языке. Отправь отчёт инструментом submit_match_coaching_report."
   );
-  return parts.join("\n\n");
+  return fitToWindow(sections, buildMatchSystemPrompt(analysis).length);
+}
+
+// The prompt has to fit Ollama's default 8192-token window together with the
+// answer, or Ollama silently drops its start - the system rules. Long games
+// (many fights, deaths and a game-flow block) went a few hundred tokens over.
+const WINDOW_TOKENS = 8192;
+const ANSWER_TOKENS = 1536;
+// Same rate as the client's context sizing (qwen3, Russian text with numbers).
+const CHARS_PER_TOKEN = 2.6;
+// The response-format guide appended by the client.
+const FORMAT_GUIDE_CHARS = 1600;
+
+function fitToWindow(sections: { text: string; drop: number }[], systemChars: number): string {
+  const budget = (WINDOW_TOKENS - ANSWER_TOKENS) * CHARS_PER_TOKEN - systemChars - FORMAT_GUIDE_CHARS;
+  const kept = [...sections];
+  const size = () => kept.reduce((s, x) => s + x.text.length + 2, 0);
+  const droppable = [...sections].filter((s) => s.drop > 0).sort((a, b) => b.drop - a.drop);
+  for (const section of droppable) {
+    if (size() <= budget) break;
+    kept.splice(kept.indexOf(section), 1);
+  }
+  return kept.map((s) => s.text).join("\n\n");
 }
 
 // ---- Validation of the model's output against the real analysis ----

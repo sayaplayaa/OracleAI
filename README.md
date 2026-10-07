@@ -72,7 +72,7 @@ The UI is built around four steps, in Russian, with nothing else on screen:
    starts immediately (no button): the same grounded match analysis as
    before (phase-by-phase, compared only with the enemy player on the same
    position), laid out as *summary -> what to fix first -> what went well ->
-   how each phase went -> details*. It takes 1-3 minutes on the local model
+   how each phase went -> full breakdown -> details*. It takes 1-3 minutes on the local model
    (up to ~5 on an 8 GB GPU, see Setup), so the page shows progress; finished
    analyses are cached (server memory
    for 6 h, and `localStorage` on the device) so reopening a game is instant.
@@ -123,6 +123,30 @@ before the model writes a word:
   one, or for a phase that was folded away) or the result of the game, or
   miscounts deaths before a time ("2 раза до 5:00" with one), is dropped.
   English names keep no Russian case endings ("Huskarу" -> "Huskar").
+- **Every mistake explained, not just named.** Each problem carries four
+  parts written in code from the replay: what happened, why it's a mistake
+  (what it cost in gold, seconds in the tavern, creep waves, fights the team
+  played a hero down), the right move in that exact spot, and an example
+  for the next game - with this game's heroes, times and numbers ("держись
+  дальше 850 ед. от Zeus - это дальность Lightning Bolt"; "больше всего
+  добиваний ты упустил между 6:00 и 8:00: +4 у тебя против +14 у Drow
+  Ranger"). Enemy disables, cast ranges and cooldowns come from the game data.
+- **Full breakdown, every aspect.** Below the phases, a tabbed section covers
+  the lane, farm and income sources, deaths, fights, items/skills/buyback,
+  vision/runes/map and buildings/Roshan. Each tab has a table against the
+  enemy on your position and the median player on your hero, what went well,
+  and every mistake found (not just the top three). Every death is reviewed
+  one by one: who killed you and with what, where, under whose ward, where
+  the killers were 25 seconds earlier, the nearest ally, what the team lost
+  while you were dead, and a verdict (avoidable / lost fight / fair trade).
+  So is every teamfight: your part in it, damage against the counterpart and
+  the gold swing. A timeline lists kills, deaths, items, levels, fights,
+  buildings, Roshan, runes and buybacks. Also checked now: a late
+  ultimate, power runes given to the enemy mid, minutes alive without farm
+  or fights, TP Scroll use against missed fights, and a Black King Bar never
+  bought on a hero that normally builds it. This part is worked out in code
+  rather than by the model: an 8B model with an 8k window can't hold it all
+  and invents numbers.
 - **Coaching rules from real material.** Each problem carries a rule distilled
   from public coaching guides, with the mechanics checked (buyback 200 + net
   worth / 13, uphill misses for ranged attacks only, comeback gold) -

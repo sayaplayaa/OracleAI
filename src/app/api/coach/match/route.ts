@@ -77,6 +77,7 @@ async function buildReport(matchId: number, accountId: number): Promise<CoachRep
     deathVision: leftAt === null ? deathVision : deathVision.filter((d) => d.time < leftAt),
     context: analysis.context,
     ...(analysis.gameFlow ? { gameFlow: analysis.gameFlow } : {}),
+    ...(analysis.breakdown ? { breakdown: analysis.breakdown } : {}),
   };
 }
 

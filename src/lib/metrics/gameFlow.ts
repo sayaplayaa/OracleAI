@@ -1,15 +1,17 @@
 import { getHeroInternalName, getHeroName } from "../constants";
 import { formatGold, formatSigned, pluralRu } from "../format";
-import type { CauseCode } from "../coach/principles";
+import {
+  aegisWastedAdvice,
+  diedBeforeFightAdvice,
+  diedFirstAdvice,
+  leadNotConvertedAdvice,
+  lostFightEnemySideAdvice,
+  noBuybackAdvice,
+} from "../coach/advice";
+import { roleGroupOf } from "../coach/principles";
+import type { Cause } from "./cause";
 import { classifyZone, positionCells } from "./mapZones";
 import type { CoachFinding, FlowFight, GameFlow, GameFlowKind, OpenDotaMatch, OpenDotaMatchPlayer } from "../types";
-
-export interface FlowCause {
-  code: CauseCode;
-  severity: number;
-  text: string;
-  target?: string;
-}
 
 type Teamfight = NonNullable<OpenDotaMatch["teamfights"]>[number];
 
@@ -60,7 +62,7 @@ function participated(fp: Teamfight["players"][number] | undefined): boolean {
 }
 
 // Where a fight happened: the average of every death position in it.
-function fightPlace(fight: Teamfight, yourIsRadiant: boolean) {
+export function fightPlace(fight: Teamfight, yourIsRadiant: boolean) {
   let sx = 0;
   let sy = 0;
   let n = 0;
@@ -101,14 +103,16 @@ export function buildGameFlow(args: {
   you: OpenDotaMatchPlayer;
   turbo: boolean;
   isCore: boolean;
+  position: number;
   // Where the analysis stops (the player left) - nothing after is theirs.
   end: number;
   laneEnd: number;
   // Registers a time label for the narrative checker and returns it.
   time: (seconds: number) => string;
   teammateLeftAt: number | null;
-}): { flow: GameFlow; causes: FlowCause[]; strengths: CoachFinding[] } | null {
+}): { flow: GameFlow; causes: Cause[]; strengths: CoachFinding[] } | null {
   const { match, you, turbo, isCore, time } = args;
+  const group = roleGroupOf(args.position);
   if (!Array.isArray(match.radiant_gold_adv) || match.radiant_gold_adv.length < 3) return null;
 
   const lead = match.radiant_gold_adv.map((v) => (you.isRadiant ? v : -v));
@@ -260,7 +264,7 @@ export function buildGameFlow(args: {
     return { taken, lost: lostCount, lastTaken };
   };
 
-  const causes: FlowCause[] = [];
+  const causes: Cause[] = [];
   const strengths: CoachFinding[] = [];
   const teammateGoneEarly = args.teammateLeftAt !== null && peak !== null && args.teammateLeftAt <= peak.minute * 60 + 120;
 
@@ -279,6 +283,7 @@ export function buildGameFlow(args: {
         severity: 55,
         text: `С перевесом ${formatSigned(peakGold)} на ${minute(peak.minute)} твоя команда за следующие ${Math.round(window / 60)} мин. снесла ${early.taken} ${pluralRu(early.taken, ["постройку", "постройки", "построек"])} - преимущество не превратилось в базу врага, и он успел собрать предметы для обороны.`,
         target: `с перевесом ${formatGold(big)}+ - хотя бы 2 постройки за ${Math.round(window / 60)} мин. (в этой игре - ${early.taken})`,
+        ...leadNotConvertedAdvice({ lead: formatSigned(peakGold), at: minute(peak.minute), taken: early.taken, minutes: Math.round(window / 60) }),
       });
     }
     const badFights = lostAfterPeak.filter((f) => f.side === "enemy" && (f.leadBefore ?? 0) >= big / 2);
@@ -290,6 +295,11 @@ export function buildGameFlow(args: {
           .map((f) => `${time(f.start)} - ${f.place ?? "вражеская половина"}, вы потеряли ${heroesRu(f.yourTeamDeaths)}, враг - ${f.enemyDeaths} (ты ${part(f)})`)
           .join("; ")}.`,
         target: `0 проигранных драк на вражеской половине, пока команда впереди (в этой игре - ${badFights.length})`,
+        ...lostFightEnemySideAdvice({
+          fights: badFights.map(
+            (f) => `${time(f.start)} - ${f.place ?? "вражеская половина"} (перевес до драки ${formatSigned(f.leadBefore ?? 0)}, после - ${formatSigned(f.leadAfter ?? 0)})`
+          ),
+        }),
       });
     }
     const aegisFights = lostAfterPeak.filter((f) => f.aegis);
@@ -299,6 +309,7 @@ export function buildGameFlow(args: {
         severity: 50,
         text: `Взяв Aegis, твоя команда проиграла драку в ${aegisFights.map((f) => time(f.start)).join(", ")} (вы потеряли ${heroesRu(aegisFights[0].yourTeamDeaths)}, враг - ${aegisFights[0].enemyDeaths}) - Aegis ушёл на погоню, а не на постройки.`,
         target: "после Roshan - сразу к вражеской башне или на хайграунд с волной крипов, без погони в туман",
+        ...aegisWastedAdvice({ fights: aegisFights.map((f) => time(f.start)) }),
       });
     }
   }
@@ -323,6 +334,10 @@ export function buildGameFlow(args: {
         .map((f) => `смерть в ${time(f.diedJustBefore!)}, через ${seconds(f.start - f.diedJustBefore!)} - драка, в которой вы потеряли ${heroesRu(f.yourTeamDeaths)}, враг - ${f.enemyDeaths}`)
         .join("; ")}.`,
       target: `0 смертей в одиночку за минуту до драки (в этой игре - ${before.length})`,
+      ...diedBeforeFightAdvice({
+        group,
+        cases: before.map((f) => ({ death: time(f.diedJustBefore!), gap: f.start - f.diedJustBefore!, lost: f.yourTeamDeaths, killed: f.enemyDeaths })),
+      }),
     });
   }
   const first = lateFights.filter((f) => f.diedFirst && lost(f));
@@ -333,6 +348,7 @@ export function buildGameFlow(args: {
       severity: (isCore ? 40 : 28) + first.length * 10 + (kind === "throw" ? 10 : 0),
       text: `В проигранных драках ${first.map((f) => time(f.start)).join(", ")} первым из команды погибал ты - команда дралась без тебя с первых секунд.`,
       target: `не быть первой смертью команды в драке (в этой игре - ${times(first.length)})`,
+      ...diedFirstAdvice({ group, times: first.map((f) => time(f.start)) }),
     });
   }
 
@@ -360,11 +376,14 @@ export function buildGameFlow(args: {
       const what = [rax > 0 ? `${rax} ${pluralRu(rax, ["казарма", "казармы", "казарм"])}` : null, throne ? "трон" : null]
         .filter(Boolean)
         .join(" и ");
+      // "пал трон", "пала 1 казарма", "пали 2 казармы и трон".
+      const fell = rax + (throne ? 1 : 0) > 1 ? "пали" : throne ? "пал" : "пала";
       causes.push({
         code: "NO_BUYBACK",
         severity: 45 + (kind === "throw" ? 10 : 0),
-        text: `В ${time(t)} ты погиб, и в следующие 2 минуты пали ${what} (${fallen.map((o) => time(o.time)).join(", ")}), а выкупа не было${cost !== null ? ` - он стоил ~${formatGold(cost)} золота при нетворсе ${formatGold(nw!)}` : ""}.`,
+        text: `В ${time(t)} ты погиб, и в следующие 2 минуты ${fell} ${what} (${fallen.map((o) => time(o.time)).join(", ")}), а выкупа не было${cost !== null ? ` - он стоил ~${formatGold(cost)} золота при нетворсе ${formatGold(nw!)}` : ""}.`,
         target: cost !== null ? `в поздней игре держать ${formatGold(cost)}+ золота на выкуп, когда решается база` : "в поздней игре держать золото на выкуп, когда решается база",
+        ...noBuybackAdvice({ time: time(t), fallen: `${fell} ${what} (${fallen.map((o) => time(o.time)).join(", ")})`, cost }),
       });
     }
   }

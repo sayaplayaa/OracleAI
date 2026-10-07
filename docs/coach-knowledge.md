@@ -54,5 +54,27 @@ report is meant to avoid.
 | `EARLY_DEATHS`, `CS_DEFICIT`, `XP_DEFICIT`, `REPEAT_KILLER` | lane deaths, last hits and XP against the same-position enemy, level 6 timing | Role-specific laning rules (wave control, trading only with your support, uphill for a ranged mid). |
 | `WARDS_DEWARDED`, `NO_VISION` | the support's Observer Wards removed by enemy heroes; too few wards per 5 minutes | Ward off the obvious spots, away from enemy eyes, and don't stand on the spot after placing it. |
 
+| `ULT_LATE` | the hero's ultimate (sixth slot of a standard kit) first learned after level 6 | Take the ultimate at 6, 12 and 18 every time. |
+| `RUNE_CONTROL` | mid only: the enemy mid took 3+ more power runes before 15:00 (Turbo 12:00) | Push the wave and be at the rune 10-15 s before each even minute from 6:00; don't contest it at lower HP. |
+| `IDLE_FARM` | pos 1-2, after the lane: 2+ minutes in a row alive, out of fights, under 3 last hits a minute (4+ minutes in total) | Between fights always farm the nearest wave or camp. |
+| `FEW_TP` | a core used TP Scroll less than half as often as the counterpart (and 3+ fewer) and missed 2+ fights while alive | Always carry a TP; teleport to the fight or the tower under attack as soon as it shows on the minimap. |
+| `NO_BKB` | a core whose hero builds Black King Bar on this position (STRATZ) never bought it, the game went 10+ minutes past the usual timing, and they died in 2+ fights after it | Survival before the next damage item. |
+
+## How a single death is judged
+
+Each death in the full breakdown gets one of three verdicts:
+
+- **Avoidable** - outside any teamfight with no enemy dying nearby within
+  10 seconds, or killed by creeps/a tower. The explanation picks what the
+  replay shows: a gank (killers 2 500+ units away 25 s earlier), an enemy
+  Observer Ward covering the spot, deep on the enemy half, 3+ enemies, farming
+  with the nearest ally 2 000+ units away, an unused heal, a failed TP out.
+  In the lane, the killer's disable and its cast range give the distance to
+  keep.
+- **In a fight** - the fight was lost or even. Dying first, or dying after
+  two allies were already dead (should have backed off), gets its own advice.
+  Otherwise the advice covers the killer's reach and missing vision.
+- **Trade** - the fight was won, or an enemy died within 10 seconds nearby.
+
 When the whole game was thrown, the game-level causes get +40 severity, so
 the report leads with how the lead was lost rather than with the lane.

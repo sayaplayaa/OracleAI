@@ -16,7 +16,8 @@ const IDLE: AnalysisState = { status: "idle" };
 // Bump when the analysis logic changes enough that old saved reports are stale.
 // v2: reports are generated in Russian.
 // v3: deaths carry place, cause and the wards standing at that moment.
-const CACHE_VERSION = "v3";
+// v4: the full breakdown - every aspect, death and fight, explained.
+const CACHE_VERSION = "v4";
 const CACHE_PREFIX = `dc.analysis.${CACHE_VERSION}:`;
 const CACHE_INDEX_KEY = `dc.analysis.index.${CACHE_VERSION}`;
 const MAX_CACHED_REPORTS = 25;
@@ -69,10 +70,22 @@ export function hasCachedReport(accountId: number, matchId: number): boolean {
   }
 }
 
+// Reports saved by an older version are never read again; with the full
+// breakdown a report is several times bigger, so they'd crowd out new ones.
+function dropOldVersions(store: Storage): void {
+  for (let i = store.length - 1; i >= 0; i--) {
+    const key = store.key(i);
+    if (key?.startsWith("dc.analysis.") && !key.startsWith(CACHE_PREFIX) && key !== CACHE_INDEX_KEY) {
+      store.removeItem(key);
+    }
+  }
+}
+
 function writeCachedReport(accountId: number, matchId: number, report: CoachReport): void {
   const store = storage();
   if (!store) return;
   try {
+    dropOldVersions(store);
     const key = keyOf(accountId, matchId);
     const index: string[] = JSON.parse(store.getItem(CACHE_INDEX_KEY) ?? "[]");
     const next = [...index.filter((k) => k !== key), key];
