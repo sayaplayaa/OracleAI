@@ -43,3 +43,6 @@ next-env.d.ts
 
 # local dev scratch output
 dev.log
+
+# battle pass progress (server-side store, real player data)
+/.data/

@@ -140,51 +140,73 @@ export function buildMatchCoachReportTool(phaseIds: string[]) {
   };
 }
 
-export const heroGuideTool = {
-  name: "submit_hero_guide",
-  description:
-    "Отправить структурированный гайд по герою Dota 2 на русском языке. Каждый совет должен ссылаться на реальную способность/эффект или реальный показатель из данных - никаких выдуманных знаний о герое.",
-  input_schema: {
-    type: "object" as const,
-    properties: {
-      identity: {
-        type: "string",
-        description:
-          "2-3 предложения на русском о роли и стиле героя, основанные на его реальном наборе способностей.",
+// The hero guide for one role. Item tips pick their item from the role's real
+// build (an enum), so the model can't rename an item or bring one in from
+// memory; what each item does and when to build it is what it writes.
+export function buildHeroGuideTool(itemNames: string[]) {
+  const itemTips = {
+    type: "array",
+    items: {
+      type: "object",
+      properties: {
+        item: { type: "string", enum: itemNames, description: "Предмет из сборки - ровно как в списке." },
+        why: {
+          type: "string",
+          description:
+            "1-2 предложения на русском: что этот предмет даёт именно этому герою - какую его способность усиливает или какую слабость закрывает. Только по описанию предмета из данных.",
+        },
+        whatToDo: {
+          type: "string",
+          description: "1 предложение на русском: что делать, когда предмет куплен - куда идти, какую цель брать, когда драться.",
+        },
       },
-      laningTips: {
-        type: "array",
-        items: findingSchema,
-        minItems: 2,
-        maxItems: 4,
-        description: "Как играть линию на этом герое, каждый пункт основан на реальной способности или стартовом предмете.",
-      },
-      powerSpikeTips: {
-        type: "array",
-        items: findingSchema,
-        minItems: 2,
-        maxItems: 4,
-        description: "Реальные пики силы по предметам/уровням, вокруг которых стоит играть, каждый со ссылкой на конкретный предмет или тайминг.",
-      },
-      teamfightTips: {
-        type: "array",
-        items: findingSchema,
-        minItems: 2,
-        maxItems: 4,
-        description: "Как использовать способности героя в тимфайтах, каждый пункт со ссылкой на конкретный эффект способности.",
-      },
-      matchupTips: {
-        type: "array",
-        items: findingSchema,
-        minItems: 3,
-        maxItems: 5,
-        description: "Что делать против реально сложных/удобных соперников, каждый пункт с винрейтом матчапа.",
-      },
+      required: ["item", "why", "whatToDo"],
+      additionalProperties: false,
     },
-    required: ["identity", "laningTips", "powerSpikeTips", "teamfightTips", "matchupTips"],
-    additionalProperties: false,
-  },
-};
+    minItems: Math.min(3, itemNames.length),
+    maxItems: 6,
+    description: "Обувь и ключевые предметы этой роли в их порядке.",
+  };
+  return {
+    name: "submit_hero_guide",
+    description:
+      "Отправить гайд по герою Dota 2 на русском языке для одной роли. Каждый совет опирается на реальную способность, предмет из сборки или число из данных.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        identity: {
+          type: "string",
+          description: "2-3 предложения на русском: как герой играет в этой роли и на чём строится его сила - по его способностям и сборке.",
+        },
+        ...(itemNames.length > 0 ? { itemTips } : {}),
+        laningTips: {
+          type: "array",
+          items: findingSchema,
+          minItems: 2,
+          maxItems: 4,
+          description: "Как играть линию на этом герое: по способностям, стартовому закупу и моменту 6 уровня.",
+        },
+        teamfightTips: {
+          type: "array",
+          items: findingSchema,
+          minItems: 2,
+          maxItems: 4,
+          description: "Как использовать способности героя в драках, каждый пункт - с конкретным эффектом способности.",
+        },
+        matchupTips: {
+          type: "array",
+          items: findingSchema,
+          minItems: 3,
+          maxItems: 5,
+          description:
+            "Что делать против самых неудобных противников и как давить удобных: через опасные способности противника из данных и свои способности и предметы; в metric - винрейт.",
+        },
+      },
+      required: ["identity", ...(itemNames.length > 0 ? ["itemTips"] : []), "laningTips", "teamfightTips", "matchupTips"],
+      additionalProperties: false,
+    },
+  };
+}
 
 const powerSpikeMomentSchema = {
   type: "object",

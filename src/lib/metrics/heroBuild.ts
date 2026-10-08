@@ -2,6 +2,8 @@ import {
   getAbilityNameById,
   getHeroName,
   getHeroTalents,
+  getItemComponents,
+  getItemCostByKey,
   getItemKeyById,
   getItemNameByKey,
   getItemTier,
@@ -9,6 +11,7 @@ import {
 import { getTalentLabel } from "../talents";
 import { wilsonScoreLowerBound } from "./statistics";
 import type {
+  StratzBootStat,
   StratzHeroBuild,
   StratzHeroPositionStat,
   StratzItemStat,
@@ -43,7 +46,6 @@ export function roleLabelForPosition(position: string): string {
 }
 
 const MIN_GAMES_FOR_ROLE = 5;
-const CORE_ITEM_PICK_RATE = 0.25;
 const MIN_ITEM_PICK_RATE = 0.05;
 const NEUTRAL_ITEMS_PER_TIER = 5;
 
@@ -107,67 +109,244 @@ export function computeMetaTierList(
   return result;
 }
 
-function toItemStat(row: StratzItemStat | StratzNeutralItemStat): ItemStat | null {
+function toItemStat(row: StratzNeutralItemStat): ItemStat | null {
   const itemKey = getItemKeyById(row.itemId);
   if (!itemKey) return null;
-  const matchCount = row.matchCount;
-  const winCount =
-    "equippedMatchWinCount" in row ? row.equippedMatchWinCount : row.winCount;
-  const denominator =
-    "equippedMatchCount" in row ? row.equippedMatchCount : row.matchCount;
+  const denominator = row.equippedMatchCount;
   return {
     itemKey,
     itemName: getItemNameByKey(itemKey),
-    matchCount,
-    winRate: denominator > 0 ? winCount / denominator : 0,
+    matchCount: row.matchCount,
+    winRate: denominator > 0 ? row.equippedMatchWinCount / denominator : 0,
   };
 }
 
-/** Collapse repeat-purchase rows (STRATZ tracks each rebuy instance) down to one entry per item. */
-function collapseByItem<T extends { itemId: number; matchCount: number }>(rows: T[]): T[] {
-  const byItem = new Map<number, T>();
-  for (const row of rows) {
-    const existing = byItem.get(row.itemId);
-    if (!existing || row.matchCount > existing.matchCount) byItem.set(row.itemId, row);
-  }
-  return [...byItem.values()];
+// Bought for the moment, not part of a build.
+const CONSUMABLES = new Set([
+  "tango",
+  "tango_single",
+  "flask",
+  "clarity",
+  "enchanted_mango",
+  "faerie_fire",
+  "smoke_of_deceit",
+  "dust",
+  "ward_observer",
+  "ward_sentry",
+  "ward_dispenser",
+  "tpscroll",
+  "tome_of_knowledge",
+  "blood_grenade",
+  "famango",
+  "great_famango",
+  "greater_famango",
+  "cheese",
+  "aegis",
+  "refresher_shard",
+  "royal_jelly",
+]);
+
+// An item bought in at least this share of games is core; below it, situational.
+const CORE_PICK_RATE = 0.2;
+const MIN_PICK_RATE = 0.03;
+// Cheap items bought in the first minutes form the early build, not the core.
+const EARLY_ITEM_MAX_COST = 1000;
+const EARLY_ITEM_MAX_MINUTE = 15;
+const EARLY_ITEM_PICK_RATE = 0.15;
+// A component only folds into an item that's popular enough to be its destination.
+const PARENT_PICK_RATE = 0.1;
+
+interface Purchase {
+  itemKey: string;
+  count: number;
+  wins: number;
+  // Median purchase minute.
+  minute: number;
 }
 
-function computeStartingItems(rows: StratzItemStat[], totalGames: number): ItemStat[] {
-  return collapseByItem(rows)
-    .filter((r) => totalGames > 0 && r.matchCount / totalGames >= MIN_ITEM_PICK_RATE)
-    .map(toItemStat)
-    .filter((s): s is ItemStat => s !== null)
+/**
+ * STRATZ answers with one row per item, per purchase (instance 0 = the first
+ * copy) and per game minute. An item's pick count is the sum of its first-
+ * purchase rows over all minutes - keeping only the biggest minute (as this
+ * used to) counted a Battle Fury bought anywhere from 9 to 22 minutes as a
+ * third of its real number, and dropped real core items below the cutoff.
+ */
+function firstPurchases(rows: StratzItemStat[]): Purchase[] {
+  const byItem = new Map<number, { count: number; wins: number; minutes: [number, number][] }>();
+  for (const row of rows) {
+    if ((row.instance ?? 0) !== 0) continue;
+    const entry = byItem.get(row.itemId) ?? { count: 0, wins: 0, minutes: [] };
+    entry.count += row.matchCount;
+    entry.wins += row.winCount;
+    entry.minutes.push([row.time ?? 0, row.matchCount]);
+    byItem.set(row.itemId, entry);
+  }
+  return [...byItem.entries()].flatMap(([itemId, e]) => {
+    const itemKey = getItemKeyById(itemId);
+    if (!itemKey || e.count === 0) return [];
+    let seen = 0;
+    let minute = 0;
+    for (const [m, c] of e.minutes.sort((a, b) => a[0] - b[0])) {
+      seen += c;
+      if (seen >= e.count / 2) {
+        minute = m;
+        break;
+      }
+    }
+    return [{ itemKey, count: e.count, wins: e.wins, minute }];
+  });
+}
+
+// STRATZ's counts can run a little over its own game count (Invoker's Boots
+// of Travel: 183 432 purchases in 172 506 games) - a share is never above 100%.
+function share(count: number, total: number): number {
+  return total > 0 ? Math.min(1, count / total) : 0;
+}
+
+function toPoint(p: Purchase, totalGames: number): ItemProgressionPoint {
+  return {
+    itemKey: p.itemKey,
+    itemName: getItemNameByKey(p.itemKey),
+    matchCount: p.count,
+    winRate: p.count > 0 ? p.wins / p.count : 0,
+    pickRate: share(p.count, totalGames),
+    avgTimeSeconds: p.minute * 60,
+  };
+}
+
+// Every component an item is built from, all the way down.
+function allComponents(key: string, seen = new Set<string>()): Set<string> {
+  for (const c of getItemComponents(key)) {
+    if (seen.has(c)) continue;
+    seen.add(c);
+    allComponents(c, seen);
+  }
+  return seen;
+}
+
+function computeStartingItems(rows: StratzItemStat[], totalGames: number): HeroBuildOverview["startingItems"] {
+  // STRATZ's wasGiven flag doesn't mean what it says (84% of Anti-Mage's
+  // second Iron Branch "given"), so every row counts.
+  const byItem = new Map<number, number[]>();
+  for (const row of rows) {
+    const counts = byItem.get(row.itemId) ?? [];
+    counts[row.instance ?? 0] = (counts[row.instance ?? 0] ?? 0) + row.matchCount;
+    byItem.set(row.itemId, counts);
+  }
+  const wins = new Map<number, number>();
+  for (const row of rows) if ((row.instance ?? 0) === 0) wins.set(row.itemId, (wins.get(row.itemId) ?? 0) + row.winCount);
+  return [...byItem.entries()]
+    .flatMap(([itemId, counts]) => {
+      const itemKey = getItemKeyById(itemId);
+      const first = counts[0] ?? 0;
+      if (!itemKey || totalGames === 0 || first / totalGames < MIN_ITEM_PICK_RATE) return [];
+      // Copies most starts have: the next instance still bought in half the games.
+      let copies = 1;
+      while ((counts[copies] ?? 0) >= first * 0.5) copies++;
+      return [
+        {
+          itemKey,
+          itemName: getItemNameByKey(itemKey),
+          matchCount: first,
+          winRate: first > 0 ? (wins.get(itemId) ?? 0) / first : 0,
+          pickRate: share(first, totalGames),
+          copies,
+        },
+      ];
+    })
     .sort((a, b) => b.matchCount - a.matchCount)
     .slice(0, 8);
 }
 
+function computeBoots(rows: StratzBootStat[], totalGames: number): ItemProgressionPoint[] {
+  const byItem = new Map<number, { count: number; wins: number; time: number }>();
+  for (const row of rows) {
+    if ((row.instance ?? 0) !== 0) continue;
+    const e = byItem.get(row.itemId) ?? { count: 0, wins: 0, time: 0 };
+    e.time = (e.time * e.count + row.timeAverage * row.matchCount) / Math.max(1, e.count + row.matchCount);
+    e.count += row.matchCount;
+    e.wins += row.winCount;
+    byItem.set(row.itemId, e);
+  }
+  return [...byItem.entries()]
+    .flatMap(([itemId, e]) => {
+      const itemKey = getItemKeyById(itemId);
+      // Plain Boots of Speed are the component, not a choice of boots.
+      if (!itemKey || itemKey === "boots" || totalGames === 0 || e.count / totalGames < MIN_PICK_RATE) return [];
+      return [
+        {
+          itemKey,
+          itemName: getItemNameByKey(itemKey),
+          matchCount: e.count,
+          winRate: e.count > 0 ? e.wins / e.count : 0,
+          pickRate: share(e.count, totalGames),
+          avgTimeSeconds: Math.round(e.time),
+        },
+      ];
+    })
+    .sort((a, b) => b.matchCount - a.matchCount);
+}
+
+/**
+ * The items of a build, the way players read one: cheap early items, then
+ * core items in their usual order (bought in 20%+ of games), then the rest.
+ * A component that's mostly bought on the way to a popular item (Perseverance
+ * to Battle Fury, Skull Basher to Abyssal Blade) is shown inside that item
+ * instead of as a core item of its own.
+ */
 function computeItemProgression(
   rows: StratzItemStat[],
   totalGames: number
-): { coreProgression: ItemProgressionPoint[]; situationalItems: ItemStat[] } {
-  const collapsed = collapseByItem(rows).filter(
-    (r) => totalGames > 0 && r.matchCount / totalGames >= MIN_ITEM_PICK_RATE
+): Pick<HeroBuildOverview, "earlyItems" | "coreProgression" | "situationalItems"> {
+  const purchases = firstPurchases(rows).filter(
+    (p) => !CONSUMABLES.has(p.itemKey) && totalGames > 0 && p.count / totalGames >= MIN_PICK_RATE
   );
+  const points = new Map(purchases.map((p) => [p.itemKey, toPoint(p, totalGames)]));
+  const parts = new Map(purchases.map((p) => [p.itemKey, allComponents(p.itemKey)]));
 
-  const core: ItemProgressionPoint[] = [];
-  const situational: ItemStat[] = [];
-
-  for (const row of collapsed) {
-    const stat = toItemStat(row);
-    if (!stat) continue;
-    const pickRate = row.matchCount / totalGames;
-    if (pickRate >= CORE_ITEM_PICK_RATE && row.time !== undefined) {
-      // STRATZ reports the purchase time in whole minutes (the most common minute for this item).
-      core.push({ ...stat, avgTimeSeconds: row.time * 60 });
-    } else {
-      situational.push(stat);
-    }
+  // A component can fold into an item that itself folds into a bigger one
+  // (Kaya into Meteor Hammer): follow the chain to the item still shown.
+  const foldedInto = new Map<string, string>();
+  const shownItem = (key: string) => {
+    while (foldedInto.has(key)) key = foldedInto.get(key)!;
+    return key;
+  };
+  for (const p of [...purchases].sort((a, b) => a.minute - b.minute)) {
+    const parents = purchases.filter(
+      (q) =>
+        q.itemKey !== p.itemKey &&
+        parts.get(q.itemKey)!.has(p.itemKey) &&
+        q.count / totalGames >= PARENT_PICK_RATE &&
+        q.minute >= p.minute
+    );
+    if (parents.length === 0) continue;
+    const parent = shownItem(parents.sort((a, b) => b.count - a.count)[0].itemKey);
+    if (parent === p.itemKey) continue;
+    const target = points.get(parent)!;
+    // Only components worth a mention on their own (Skull Basher, not Wind Lace).
+    if (p.count / totalGames >= PARENT_PICK_RATE) target.builtFrom = [...(target.builtFrom ?? []), points.get(p.itemKey)!];
+    points.delete(p.itemKey);
+    foldedInto.set(p.itemKey, parent);
   }
 
+  const early: ItemProgressionPoint[] = [];
+  const core: ItemProgressionPoint[] = [];
+  const situational: ItemProgressionPoint[] = [];
+  for (const point of points.values()) {
+    const pick = point.pickRate ?? 0;
+    if (getItemCostByKey(point.itemKey) < EARLY_ITEM_MAX_COST && point.avgTimeSeconds <= EARLY_ITEM_MAX_MINUTE * 60) {
+      if (pick >= EARLY_ITEM_PICK_RATE) early.push(point);
+      else situational.push(point);
+    } else if (pick >= CORE_PICK_RATE) {
+      core.push(point);
+    } else {
+      situational.push(point);
+    }
+  }
   return {
-    coreProgression: core.sort((a, b) => a.avgTimeSeconds - b.avgTimeSeconds).slice(0, 14),
-    situationalItems: situational.sort((a, b) => b.matchCount - a.matchCount).slice(0, 14),
+    earlyItems: early.sort((a, b) => a.avgTimeSeconds - b.avgTimeSeconds),
+    coreProgression: core.sort((a, b) => a.avgTimeSeconds - b.avgTimeSeconds).slice(0, 10),
+    situationalItems: situational.sort((a, b) => b.matchCount - a.matchCount).slice(0, 12),
   };
 }
 
@@ -230,18 +409,14 @@ export function computeHeroBuildOverview(
   totalGamesForPosition: number,
   build: StratzHeroBuild
 ): HeroBuildOverview {
-  const { coreProgression, situationalItems } = computeItemProgression(
-    build.fullPurchases,
-    totalGamesForPosition
-  );
-
   return {
     heroId,
     position,
     roleLabel: roleLabelForPosition(position),
+    games: totalGamesForPosition,
     startingItems: computeStartingItems(build.startingItems, totalGamesForPosition),
-    coreProgression,
-    situationalItems,
+    boots: computeBoots(build.boots, totalGamesForPosition),
+    ...computeItemProgression(build.fullPurchases, totalGamesForPosition),
     neutralTiers: computeNeutralTiers(build.neutralItems),
     talents: computeTalents(heroId, build.talents),
   };

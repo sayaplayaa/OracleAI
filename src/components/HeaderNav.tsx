@@ -18,7 +18,7 @@ const LINKS = [
   { href: "/drafts", label: "Мета" },
   { href: "/heroes", label: "Гайды" },
   { href: "/tournaments", label: "Турниры" },
-  { href: "/challenges", label: "Испытания" },
+  { href: "/challenges", label: "Пропуск" },
   { href: "/riddles", label: "Загадки" },
 ];
 

@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { HeroBuildOverview, RolePickStat } from "@/lib/types";
-import { RoleTabs } from "./RoleTabs";
+import type { HeroBuildOverview } from "@/lib/types";
 import { ItemBuildList } from "./ItemBuildList";
 import { ItemTimeline } from "./ItemTimeline";
 import { NeutralItemTiers } from "./NeutralItemTiers";
@@ -15,33 +14,22 @@ type BuildState = { build: HeroBuildOverview } | { error: string };
 function BuildSkeleton() {
   return (
     <div className="space-y-4" aria-hidden>
-      <div className="grid lg:grid-cols-[360px_minmax(0,1fr)] gap-4">
-        <div className="h-[260px] rounded-2xl bg-surface border border-border animate-pulse" />
-        <div className="h-[260px] rounded-2xl bg-surface border border-border animate-pulse" />
-      </div>
+      <div className="h-[200px] rounded-2xl bg-surface border border-border animate-pulse" />
       <div className="grid lg:grid-cols-2 gap-4">
-        <div className="h-[340px] rounded-2xl bg-surface border border-border animate-pulse" />
-        <div className="h-[340px] rounded-2xl bg-surface border border-border animate-pulse" />
+        <div className="h-[260px] rounded-2xl bg-surface border border-border animate-pulse" />
+        <div className="h-[260px] rounded-2xl bg-surface border border-border animate-pulse" />
       </div>
     </div>
   );
 }
 
 /**
- * A hero's real build for one position (STRATZ, this week): role picker, then
- * starting items, core order with timings, talents, situational and neutral
- * items. Builds already loaded are kept, so switching roles back is instant.
+ * A hero's real build for one position (STRATZ, Legend+, this week): core
+ * items in order with how often they're built and when, boots and early
+ * items, starting items, talents, situational and neutral items. Builds
+ * already loaded are kept, so switching roles back is instant.
  */
-export function HeroBuildPanel({
-  heroId,
-  roles,
-  initialPosition,
-}: {
-  heroId: number;
-  roles: RolePickStat[];
-  initialPosition: string | null;
-}) {
-  const [position, setPosition] = useState(initialPosition);
+export function HeroBuildPanel({ heroId, position }: { heroId: number; position: string | null }) {
   const [builds, setBuilds] = useState<Record<string, BuildState>>({});
 
   useEffect(() => {
@@ -68,13 +56,6 @@ export function HeroBuildPanel({
     };
   }, [heroId, position, builds]);
 
-  function select(next: string) {
-    setPosition(next);
-    const url = new URL(window.location.href);
-    url.searchParams.set("pos", next);
-    window.history.replaceState(null, "", url);
-  }
-
   function retry() {
     if (!position) return;
     setBuilds((b) => {
@@ -84,7 +65,7 @@ export function HeroBuildPanel({
     });
   }
 
-  if (roles.length === 0) {
+  if (!position) {
     return (
       <div className="bg-surface border border-border rounded-2xl p-6 text-sm text-ink-secondary leading-relaxed">
         Нет данных по ролям на этой неделе: STRATZ не ответил или на этом герое пока слишком мало игр
@@ -93,60 +74,66 @@ export function HeroBuildPanel({
     );
   }
 
-  const state = position ? builds[position] : undefined;
+  const state = builds[position];
+  if (!state) return <BuildSkeleton />;
+  if ("error" in state) {
+    return (
+      <div className="bg-surface border border-border rounded-2xl p-6 space-y-3" role="alert">
+        <p className="text-sm text-status-critical">{state.error}</p>
+        <button type="button" onClick={retry} className={secondaryButton}>
+          Повторить
+        </button>
+      </div>
+    );
+  }
 
+  const { build } = state;
   return (
-    <div className="space-y-4">
-      <RoleTabs roles={roles} active={position} onSelect={select} />
+    <div className="space-y-4 rise-in" key={position}>
+      <div className="bg-surface border border-border rounded-2xl p-5" style={{ boxShadow: "inset 0 3px 0 0 var(--color-accent)" }}>
+        <PanelHeader
+          title="Ключевые предметы по порядку"
+          note={`Предметы, которые собирают хотя бы в 20% игр (${build.games.toLocaleString("ru-RU")} игр на Легенде и выше за эту неделю), в их обычном порядке: минута покупки и доля игр. Компоненты, которые покупают по пути, указаны под предметом.`}
+        />
+        <ItemTimeline items={build.coreProgression} />
+      </div>
 
-      {!state ? (
-        <BuildSkeleton />
-      ) : "error" in state ? (
-        <div className="bg-surface border border-border rounded-2xl p-6 space-y-3" role="alert">
-          <p className="text-sm text-status-critical">{state.error}</p>
-          <button type="button" onClick={retry} className={secondaryButton}>
-            Повторить
-          </button>
+      <div className="grid lg:grid-cols-3 gap-4 items-start">
+        <ItemBuildList
+          title="Стартовый закуп"
+          description="Что берут на старте: доля игр и винрейт."
+          items={build.startingItems}
+        />
+        <ItemBuildList
+          title="Ранние предметы"
+          description="Недорогие предметы первых минут."
+          items={build.earlyItems}
+          showTime
+          emptyMessage="На этой роли ранних предметов почти не берут."
+        />
+        <ItemBuildList title="Обувь" description="Какие сапоги собирают и к какой минуте." items={build.boots} showTime emptyMessage="Нет данных об обуви." />
+      </div>
+
+      <div className="grid lg:grid-cols-2 gap-4 items-start">
+        <div className="bg-surface border border-border rounded-2xl p-5">
+          <PanelHeader
+            title="Таланты"
+            note="Золотая рамка - вариант, который чаще берут; зелёный процент - вариант с более высоким винрейтом."
+          />
+          <TalentTable levels={build.talents} />
         </div>
-      ) : (
-        <div className="space-y-4 rise-in" key={position}>
-          <div className="grid lg:grid-cols-[360px_minmax(0,1fr)] gap-4 items-start">
-            <ItemBuildList
-              title="Стартовый закуп"
-              description="Самый частый набор на старте."
-              items={state.build.startingItems}
-            />
-            <div className="bg-surface border border-border rounded-2xl p-5">
-              <PanelHeader
-                title="Ключевые предметы по порядку"
-                note="Предметы, которые на этой неделе купили хотя бы 25% игроков на этом герое и позиции, в их реальном среднем порядке и тайминге. Дальше игры расходятся под матчап - смотри ситуативные предметы."
-              />
-              <ItemTimeline items={state.build.coreProgression} />
-            </div>
-          </div>
+        <ItemBuildList
+          title="Ситуативные предметы"
+          description="Берут реже, чем в 20% игр: под конкретный матчап или затяжную игру. Сначала самые частые."
+          items={build.situationalItems}
+        />
+      </div>
 
-          <div className="grid lg:grid-cols-2 gap-4 items-start">
-            <div className="bg-surface border border-border rounded-2xl p-5">
-              <PanelHeader
-                title="Таланты"
-                note="Золотая рамка - вариант, который чаще берут; зелёный процент - вариант с более высоким винрейтом."
-              />
-              <TalentTable levels={state.build.talents} />
-            </div>
-            <ItemBuildList
-              title="Ситуативные предметы"
-              description="Берут реже, чем в 25% игр: покупки под лейтгейм и конкретный матчап, сначала самые частые."
-              items={state.build.situationalItems}
-            />
-          </div>
-
-          <div className="bg-surface border border-border rounded-2xl p-5">
-            <PanelHeader
-              title="Нейтральные предметы"
-              note="По тирам, отсортированы по винрейту. Обведён лучший в тире."
-            />
-            <NeutralItemTiers tiers={state.build.neutralTiers} />
-          </div>
+      {/* STRATZ currently returns no neutral item stats at all; the block only shows when it does. */}
+      {build.neutralTiers.length > 0 && (
+        <div className="bg-surface border border-border rounded-2xl p-5">
+          <PanelHeader title="Нейтральные предметы" note="По тирам, отсортированы по винрейту. Обведён лучший в тире." />
+          <NeutralItemTiers tiers={build.neutralTiers} />
         </div>
       )}
     </div>

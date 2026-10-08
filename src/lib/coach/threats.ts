@@ -1,4 +1,4 @@
-import { abilities, hero_abilities as heroAbilities } from "dotaconstants";
+import { abilities, hero_abilities as heroAbilities, heroes } from "dotaconstants";
 import { getHeroInternalName } from "../constants";
 
 type AbilityAttrib = { header?: string; value: string | string[] };
@@ -91,4 +91,25 @@ export function ultimateKey(heroId: number): string | null {
   if (keys.length !== 6) return null;
   const ult = abilitiesByKey[keys[5]];
   return ult?.dname && !ult.is_innate ? keys[5] : null;
+}
+
+let owners: Map<string, Set<number>> | null = null;
+
+/**
+ * Which heroes have an ability by this in-game name ("Earth Spike" -> Lion),
+ * for checking that a guide doesn't hand one hero's ability to another.
+ */
+export function abilityOwners(): Map<string, Set<number>> {
+  if (owners) return owners;
+  owners = new Map();
+  for (const [id, hero] of Object.entries(heroes as unknown as Record<string, { name: string }>)) {
+    for (const key of heroAbilitiesByName[hero.name]?.abilities ?? []) {
+      const name = abilitiesByKey[key]?.dname;
+      if (!name || name.length < 4) continue;
+      const set = owners.get(name) ?? new Set<number>();
+      set.add(Number(id));
+      owners.set(name, set);
+    }
+  }
+  return owners;
 }

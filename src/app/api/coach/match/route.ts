@@ -8,6 +8,8 @@ import { resolveAllPositions } from "@/lib/metrics/matchPositions";
 import { buildMatchAnalysis } from "@/lib/metrics/matchAnalysis";
 import { isAnalysableMode, isTurbo } from "@/lib/metrics/gameContext";
 import { coachMatch } from "@/lib/coach/client";
+import { getSessionAccountId } from "@/lib/session";
+import { recordReview } from "@/lib/battlePass/service";
 import type { CoachReport } from "@/lib/types";
 
 class CoachRouteError extends Error {
@@ -81,6 +83,14 @@ async function buildReport(matchId: number, accountId: number): Promise<CoachRep
   };
 }
 
+// A signed-in player reviewing their own game counts for the battle pass
+// review challenge (once per game). Never fails the report.
+async function countReview(report: CoachReport, matchId: number, accountId: number): Promise<void> {
+  if (!report.phases || report.phases.length === 0) return;
+  const session = await getSessionAccountId();
+  if (session === accountId) await recordReview(accountId, matchId).catch(() => undefined);
+}
+
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   const matchId = Number(body?.matchId);
@@ -95,7 +105,10 @@ export async function POST(req: NextRequest) {
 
   const key = `${matchId}:${accountId}`;
   const hit = finished.get(key);
-  if (hit && hit.expiresAt > Date.now()) return NextResponse.json(hit.report);
+  if (hit && hit.expiresAt > Date.now()) {
+    await countReview(hit.report, matchId, accountId);
+    return NextResponse.json(hit.report);
+  }
 
   let pending = inFlight.get(key);
   if (!pending) {
@@ -113,7 +126,9 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    return NextResponse.json(await pending);
+    const report = await pending;
+    await countReview(report, matchId, accountId);
+    return NextResponse.json(report);
   } catch (err) {
     if (err instanceof CoachRouteError) {
       return NextResponse.json({ error: err.message }, { status: err.status });

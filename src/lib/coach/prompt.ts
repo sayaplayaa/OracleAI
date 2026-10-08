@@ -2,10 +2,7 @@ import { pluralRu } from "../format";
 import type {
   CoachFinding,
   CrossMatchPatterns,
-  DraftInsights,
   LaneTally,
-  HeroAbility,
-  HeroRoleOverview,
   MatchStory,
   ProHeroSpotlight,
   RoleComparisonEntry,
@@ -269,45 +266,4 @@ function proComparisonLines(user: HeroPerformanceSummary, pro: ProHeroSpotlight)
     const verdict = mine > theirs ? "у игрока БОЛЬШЕ, чем у про" : mine < theirs ? "у игрока МЕНЬШЕ, чем у про" : "одинаково";
     return `- ${label}: игрок ${format(mine)}, ${pro.pro.name} ${format(theirs)} - ${verdict}`;
   });
-}
-
-export function buildHeroGuidePrompt(
-  heroName: string,
-  abilities: HeroAbility[],
-  roleOverview: HeroRoleOverview,
-  matchups: DraftInsights
-): string {
-  return `Напиши на русском языке гайд по герою Dota 2 ${heroName} через инструмент submit_hero_guide. Это общие знания о герое для любого игрока, который его осваивает, а не личный разбор игры одного игрока.
-
-Правила:
-- Каждый совет должен ссылаться либо на реальную способность/эффект из набора ниже, либо на реальное число из данных по ролям/матчапам (например: «Mana Void наносит урон за каждую единицу недостающей маны», «62% побед на позиции 1, 340 игр», «38% побед против Axe, 25 игр»).
-- Никогда не придумывай эффект способности, перезарядку или матчап, которых нет в этих данных.
-- "laningTips" и "powerSpikeTips" должны основываться на наборе способностей (что каждая способность даёт рано, когда она раскрывается).
-- "teamfightTips" должны основываться на эффектах способностей, важных в тимфайтах.
-- "matchupTips" должны основываться на реальных самых сложных/удобных матчапах ниже - что делать иначе против этих конкретных героев или вместе с ними.
-- Названия героев, способностей и предметов оставляй как в данных (по-английски).
-
-Реальный набор способностей (официальные данные игры):
-${JSON.stringify(abilities.map(compactAbility))}
-
-Реальные винрейты по ролям (текущая неделя, STRATZ):
-${JSON.stringify(roleOverview.roles)}
-
-Реальные данные по матчапам (OpenDota, за всё время):
-${JSON.stringify({ toughestMatchups: matchups.toughestMatchups.map(compactMatchup), bestMatchups: matchups.bestMatchups.map(compactMatchup) })}`;
-}
-
-// Only what the guide is written from: the English original description is
-// for the app's own keyword checks and the icon is for the page.
-function compactAbility(a: HeroAbility) {
-  return {
-    name: a.name,
-    ...(a.isInnate ? { innate: true } : {}),
-    description: a.description,
-    values: Object.fromEntries(a.attributes.map((attr) => [attr.header, attr.value])),
-  };
-}
-
-function compactMatchup(m: DraftInsights["bestMatchups"][number]) {
-  return { hero: m.heroName, games: m.gamesPlayed, winRate: `${Math.round(m.winRate * 100)}%` };
 }

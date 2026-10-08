@@ -1,32 +1,35 @@
 import type { Metadata } from "next";
 import { getSessionAccountId } from "@/lib/session";
-import { ChallengesBoard } from "@/components/ChallengesBoard";
+import { REWARDS, SEASON } from "@/lib/battlePass/season";
+import type { RewardView } from "@/lib/battlePass/types";
+import { BattlePassBoard } from "@/components/battlePass/BattlePassBoard";
 import { PageContainer } from "@/components/PageContainer";
 import { PageHeader } from "@/components/PageHeader";
 
 export const metadata: Metadata = {
-  title: "Испытания - Dota Coach AI",
+  title: "Боевой пропуск - Dota Coach AI",
 };
 
 const STEPS = [
-  ["Цели из твоих игр", "Смерти, KDA и фарм на основном герое - от твоего реального среднего."],
-  ["Прими вызов", "Выбери испытание, которое хочешь закрыть в ближайших играх."],
-  ["Засчитывает матч", "Каждая новая игра проверяется автоматически - без ручных отметок."],
+  ["Получи пропуск", "Он открывает награды сезона - скины, предметы и Dota Plus."],
+  ["Выполняй испытания", "Каждую неделю - новые цели по твоим играм. Засчитывает реальный матч."],
+  ["Забирай награды", "Каждые 1 000 очков - новый уровень, на ключевых уровнях - награда."],
 ];
 
 export default async function ChallengesPage() {
   const accountId = await getSessionAccountId();
+  const preview: RewardView[] = REWARDS.map((r) => ({ ...r, state: "locked" }));
 
   return (
     <PageContainer className="space-y-10">
       <PageHeader
-        eyebrow="Тренировка · по твоим реальным матчам"
+        eyebrow={`Испытания · ${SEASON.name}`}
         title={
           <>
-            Испытания <span className="text-accent">на рост</span>
+            Боевой <span className="text-accent">пропуск</span>
           </>
         }
-        description="Конкретные цели чуть выше твоего текущего уровня. Мы проверяем их по реальным матчам, пока ты действительно их не выполнишь."
+        description="Выполняй испытания, построенные по твоим реальным играм, поднимай уровень пропуска и получай скины, предметы и Dota Plus. Каждое испытание засчитывается только настоящим матчем."
         aside={
           <ol className="grid sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3 gap-2 lg:w-[300px] xl:w-[560px]">
             {STEPS.map(([title, text], i) => (
@@ -41,7 +44,7 @@ export default async function ChallengesPage() {
           </ol>
         }
       />
-      <ChallengesBoard sessionAccountId={accountId} />
+      <BattlePassBoard signedIn={accountId !== null} accountId={accountId} preview={preview} />
     </PageContainer>
   );
 }

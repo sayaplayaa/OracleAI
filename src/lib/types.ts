@@ -883,10 +883,26 @@ export interface HeroAbility {
 
 export interface HeroGuideReport {
   identity: string;
+  // The role the guide is written for.
+  position: string;
+  roleLabel: string;
+  // The real build it was written from - shown as-is, never written by the model.
+  build: Pick<HeroBuildOverview, "games" | "earlyItems" | "boots" | "coreProgression"> | null;
+  // Boots and core items: why each one, and what to do once it's bought.
+  itemTips: HeroGuideItemTip[];
   laningTips: CoachFinding[];
-  powerSpikeTips: CoachFinding[];
   teamfightTips: CoachFinding[];
   matchupTips: CoachFinding[];
+}
+
+export interface HeroGuideItemTip {
+  itemKey: string;
+  itemName: string;
+  // From the build data, never from the model.
+  pickRate: number;
+  avgTimeSeconds: number;
+  why: string;
+  whatToDo: string;
 }
 
 // ---- Skill build (real, per-match ability level-up order) ----
@@ -1040,10 +1056,16 @@ export interface ItemStat {
   itemName: string;
   matchCount: number;
   winRate: number;
+  // Share of this hero+position's games (Legend+, this week) it was bought in.
+  pickRate?: number;
 }
 
 export interface ItemProgressionPoint extends ItemStat {
+  // Median minute it's bought in, as seconds.
   avgTimeSeconds: number;
+  // Components bought on the way that are popular in their own right
+  // (Skull Basher before Abyssal Blade), folded into this item.
+  builtFrom?: ItemStat[];
 }
 
 export interface NeutralItemTier {
@@ -1077,9 +1099,16 @@ export interface HeroBuildOverview {
   heroId: number;
   position: string;
   roleLabel: string;
-  startingItems: ItemStat[];
+  // Games this build is drawn from (Legend+, this week).
+  games: number;
+  // `copies`: how many of it the usual start has (Iron Branch x3).
+  startingItems: (ItemStat & { copies: number })[];
+  // Cheap items bought in the first minutes (Magic Wand, Wraith Band).
+  earlyItems: ItemProgressionPoint[];
+  boots: ItemProgressionPoint[];
+  // Bought in 20%+ of games, in their usual order.
   coreProgression: ItemProgressionPoint[];
-  situationalItems: ItemStat[];
+  situationalItems: ItemProgressionPoint[];
   neutralTiers: NeutralItemTier[];
   talents: TalentLevel[];
 }

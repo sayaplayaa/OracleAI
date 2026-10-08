@@ -79,6 +79,32 @@ export function getItemCostByKey(key: string): number {
   return itemsByKey[key]?.cost ?? 0;
 }
 
+/** The items an item is assembled from (direct components only; repeats kept). */
+export function getItemComponents(key: string): string[] {
+  const components = (itemsByKey[key] as { components?: string[] | null } | undefined)?.components;
+  return Array.isArray(components) ? components : [];
+}
+
+/**
+ * What an item actually does, for the coach prompts: its active/passive
+ * abilities ("Cleave: Deals 60% of attack damage...") and its main bonuses.
+ * The bonuses alone misled the model (Power Treads read as an evasion item).
+ */
+export function getItemMechanics(itemKey: string, maxLength = 260): string {
+  const item = itemsByKey[itemKey] as (ItemConst & { abilities?: { type: string; title: string; description: string }[] }) | undefined;
+  if (!item) return "";
+  // "Chop Tree" and "Quell" are on every Quelling Blade item - noise for a guide.
+  const abilities = (item.abilities ?? [])
+    .filter((a) => !/^(Chop Tree|Quell)$/.test(a.title))
+    .map((a) => `${a.title}: ${a.description.split("\n")[0].trim()}`);
+  const bonuses = (item.attrib ?? [])
+    .filter((a) => a.display && a.value !== undefined && a.value !== "")
+    .slice(0, 4)
+    .map((a) => a.display!.replace("{value}", Array.isArray(a.value) ? a.value.join("/") : (a.value ?? "")).trim());
+  const text = [...abilities, bonuses.length > 0 ? bonuses.join(", ") : null].filter(Boolean).join(" | ").replace(/\s+/g, " ");
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+}
+
 /** An item built from components (Manta Style, Power Treads) rather than a component itself. */
 export function isAssembledItem(key: string): boolean {
   const components = (itemsByKey[key] as { components?: string[] | null } | undefined)?.components;

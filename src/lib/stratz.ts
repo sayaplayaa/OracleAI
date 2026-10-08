@@ -248,9 +248,27 @@ export interface StratzHeroPositionStat {
   winCount: number;
 }
 
+// One row per item, per purchase (instance 0 = the first copy bought, 1 = the
+// second...) and, for full purchases, per game minute it was bought in - an
+// item's real pick count is the sum of its instance-0 rows over every minute.
 export interface StratzItemStat {
   itemId: number;
+  instance?: number | null;
+  // Game minute of the purchase (full purchases only).
   time?: number;
+  matchCount: number;
+  winCount: number;
+  // Starting items only: handed over by a teammate rather than bought.
+  wasGiven?: boolean | null;
+}
+
+// Boots come from their own STRATZ query: the full-purchase list never
+// includes them (Power Treads on Anti-Mage simply wasn't there).
+export interface StratzBootStat {
+  itemId: number;
+  instance?: number | null;
+  // Seconds.
+  timeAverage: number;
   matchCount: number;
   winCount: number;
 }
@@ -279,15 +297,19 @@ export interface StratzTalentStat {
 // game count - was letting the noise through.
 const META_BRACKETS = ["LEGEND_ANCIENT", "DIVINE_IMMORTAL"];
 
+// STRATZ's `stats` without a time filter answers with its last game-minute
+// bucket - games that reached minute 35 - not every game (Anti-Mage carry:
+// 91 300 against 126 723 games in total). maxTime: 0 is the bucket that
+// holds every game, which item pick rates and win rates need.
 /** Real pick/win rate per position (1-5), for the hero's role tabs. */
 export function getHeroPositionStats(heroId: number) {
-  return cached(`stratz:hero-positions:${heroId}:v2`, 6 * HOUR, async () => {
+  return cached(`stratz:hero-positions:${heroId}:v3`, 6 * HOUR, async () => {
     const data = await graphql<{
       heroStats: { stats: StratzHeroPositionStat[] };
     }>(
       `query HeroPositionStats($heroId: Short!, $brackets: [RankBracketBasicEnum]) {
         heroStats {
-          stats(heroIds: [$heroId], groupByPosition: true, bracketBasicIds: $brackets) {
+          stats(heroIds: [$heroId], groupByPosition: true, bracketBasicIds: $brackets, maxTime: 0) {
             heroId
             position
             matchCount
@@ -303,7 +325,7 @@ export function getHeroPositionStats(heroId: number) {
 
 const ALL_HERO_STATS_QUERY = `query AllHeroPositionStats($heroIds: [Short], $brackets: [RankBracketBasicEnum]) {
   heroStats {
-    stats(heroIds: $heroIds, groupByPosition: true, bracketBasicIds: $brackets) {
+    stats(heroIds: $heroIds, groupByPosition: true, bracketBasicIds: $brackets, maxTime: 0) {
       heroId
       position
       matchCount
@@ -321,7 +343,7 @@ const HERO_STATS_BATCH_SIZE = 20;
  * to resolve field 'stats'"), so this chunks the request and merges results.
  */
 export function getAllHeroStats(heroIds: number[]) {
-  return cached(`stratz:all-hero-positions:v2`, 6 * HOUR, async () => {
+  return cached(`stratz:all-hero-positions:v3`, 6 * HOUR, async () => {
     const batches: number[][] = [];
     for (let i = 0; i < heroIds.length; i += HERO_STATS_BATCH_SIZE) {
       batches.push(heroIds.slice(i, i + HERO_STATS_BATCH_SIZE));
@@ -341,42 +363,57 @@ export function getAllHeroStats(heroIds: number[]) {
 export interface StratzHeroBuild {
   startingItems: StratzItemStat[];
   fullPurchases: StratzItemStat[];
+  boots: StratzBootStat[];
   neutralItems: StratzNeutralItemStat[];
   talents: StratzTalentStat[];
 }
 
-/** Current-week item/talent build data for a hero at one position - the same "last 7-8 days" window D2PT itself uses. */
+/**
+ * Current-week item/talent build data for a hero at one position - the same
+ * "last 7-8 days" window D2PT itself uses. Same Legend+ brackets as the role
+ * stats, so item counts and game counts describe the same games.
+ */
 export function getHeroBuild(heroId: number, position: string) {
-  return cached(`stratz:hero-build:${heroId}:${position}`, 6 * HOUR, async () => {
+  return cached(`stratz:hero-build:${heroId}:${position}:v2`, 6 * HOUR, async () => {
     const data = await graphql<{ heroStats: StratzHeroBuild }>(
-      `query HeroBuild($heroId: Short!, $positions: [MatchPlayerPositionType]) {
+      `query HeroBuild($heroId: Short!, $positions: [MatchPlayerPositionType], $brackets: [RankBracketBasicEnum]) {
         heroStats {
-          startingItems: itemStartingPurchase(heroId: $heroId, positionIds: $positions) {
+          startingItems: itemStartingPurchase(heroId: $heroId, positionIds: $positions, bracketBasicIds: $brackets) {
             itemId
+            instance
+            wasGiven
             matchCount
             winCount
           }
-          fullPurchases: itemFullPurchase(heroId: $heroId, positionIds: $positions) {
+          fullPurchases: itemFullPurchase(heroId: $heroId, positionIds: $positions, bracketBasicIds: $brackets) {
             itemId
+            instance
             time
             matchCount
             winCount
           }
-          neutralItems: itemNeutral(heroId: $heroId, positionIds: $positions) {
+          boots: itemBootPurchase(heroId: $heroId, positionIds: $positions, bracketBasicIds: $brackets) {
+            itemId
+            instance
+            timeAverage
+            matchCount
+            winCount
+          }
+          neutralItems: itemNeutral(heroId: $heroId, positionIds: $positions, bracketBasicIds: $brackets) {
             itemId
             matchCount
             winCount
             equippedMatchCount
             equippedMatchWinCount
           }
-          talents: talent(heroId: $heroId, positionIds: $positions) {
+          talents: talent(heroId: $heroId, positionIds: $positions, bracketBasicIds: $brackets) {
             abilityId
             matchCount
             winCount
           }
         }
       }`,
-      { heroId, positions: [position] }
+      { heroId, positions: [position], brackets: META_BRACKETS }
     );
     // STRATZ returns null (not []) for a field when a hero+position combo
     // has no real data at all (e.g. an off-meta position for that hero) -
@@ -385,6 +422,7 @@ export function getHeroBuild(heroId: number, position: string) {
     return {
       startingItems: data.heroStats.startingItems ?? [],
       fullPurchases: data.heroStats.fullPurchases ?? [],
+      boots: data.heroStats.boots ?? [],
       neutralItems: data.heroStats.neutralItems ?? [],
       talents: data.heroStats.talents ?? [],
     };

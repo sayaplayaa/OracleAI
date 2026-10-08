@@ -43,6 +43,8 @@ Open http://localhost:3000.
     few minutes instead of under one. `OLLAMA_NUM_GPU` pins the layer count;
     a smaller model (`ollama pull qwen3:4b`, `OLLAMA_MODEL=qwen3:4b`) keeps
     everything on the GPU at some cost in report quality.
+- **`BATTLE_PASS_DEV_UNLOCK`** (test setups only) - `1` lets the battle pass
+  "buy" button activate the pass for free, since payment isn't connected yet.
 - **`SESSION_SECRET`** (required for Steam login) - any long random string
   used to sign the session cookie, e.g. `openssl rand -hex 32`. It's a local
   secret, not a third-party credential.
@@ -153,7 +155,7 @@ before the model writes a word:
   sources and the rule per problem are in `docs/coach-knowledge.md`.
 
 Everything else is in the header on every page: Meta, Guides, Tournaments,
-Challenges, Riddles, the full player profile and the search bar
+the battle pass, Riddles, the full player profile and the search bar
 (`/advanced` lists the same tools). The floating AI Coach button is hidden
 on the home and analysis pages (the analysis is the page itself there) and
 shown everywhere else.
@@ -272,21 +274,50 @@ tiny lucky sample.
 
 `/heroes` is the hero grid grouped by primary attribute, as in the game,
 with search and attribute/role filters. Each hero page has a banner (week
-win rate, games, main role) and four tabs:
-- **Build** - role picker (win rate and share of games per position), then
-  the real STRATZ current-week build for that position: starting items, core
-  items in order with average timings, talents (most picked / highest win
-  rate), situational items and neutral items by tier. Talents read as the
+win rate, games, main role) and then everything on one page, in this order,
+with a sticky row of links to jump between the parts:
+
+- **Role** - one picker (win rate and share of games per position) that
+  drives both the AI guide and the build below.
+- **AI guide, first** - so it never has to be looked for. One click writes
+  it for the selected role; once written it's kept on the server for 12 hours
+  and opens straight away for everyone. It's built from the role's real
+  build: the core items are shown from the data as they are, and the model
+  explains each one (what it gives this hero, what to do once it's bought),
+  plus laning, teamfights and matchups. What the model writes is checked:
+  item cards pick their item from the build itself (a fixed list, so no
+  renamed or remembered items); any sentence naming an item outside the
+  build - in English or transliterated ("блинк-даггер") - is dropped, as is
+  one that gives an opponent an ability it doesn't have, or a tip whose
+  numbers aren't in the data. Matchup tips get each opponent's real disables
+  (with cast range) to work from.
+- **Build** - the real STRATZ current-week build for that position (Legend+):
+  core items in their usual order with how often they're built and at which
+  minute, the components bought on the way ("через Skull Basher"), boots and
+  early items, starting items (with copies, "Iron Branch ×2"), talents (most
+  picked / highest win rate) and situational items. Talents read as the
   Russian client shows them, with their real numbers ("+200 к радиусу Mana
-  Void") from Valve's ability files - `dotaconstants` has no hero-talent
-  values, and 70% of talents used to show "+?".
+  Void") from Valve's ability files.
 - **Abilities** - every real ability (name, official description, numeric
   attributes, icon), straight from `dotaconstants`' game-client data.
 - **Matchups** - toughest and easiest opponents (OpenDota) and best lane
   partners (STRATZ).
-- **AI guide** - a written guide (laning, power spikes, teamfighting,
-  matchups) grounded in the real ability kit and stats, via its own
-  structured-output schema (general hero knowledge, not one player's games).
+
+How core items are worked out (the old list missed real core items):
+STRATZ answers with one row per item, per purchase (first copy, second...)
+and per game minute. An item's pick count is the sum of its first-purchase
+rows over every minute - keeping only the biggest minute counted Battle Fury
+on Anti-Mage at a third of its real number. Boots come from their own STRATZ
+query (the full-purchase list never has them - Power Treads, bought in
+almost every Anti-Mage game, was missing). Item counts and the game count are
+both Legend+ (item counts used to cover every bracket against a Legend+ game
+count), and the game count is every game: STRATZ's position stats without a
+time filter return only the games that reached minute 35 (91 300 of 126 723
+for Anti-Mage carry), which made every pick rate ~40% too high. Core = bought
+in 20%+ of games, ordered by median purchase minute; a component bought on
+the way to a popular item (Perseverance, Yasha, Skull Basher) is shown inside
+that item; cheap first-minutes items (Magic Wand, Wraith Band) are listed
+separately. The same build data feeds the match analysis' item timings.
 
 ### Tournaments (`/tournaments`)
 
@@ -305,21 +336,43 @@ Real competitive Dota, not personal stats:
 - There's no public schedule of upcoming matches on OpenDota, so this is
   results + live only, not a fixture list.
 
-### Challenges (`/challenges`)
+### Battle pass (`/challenges`)
 
-Training goals generated from your own real recent games (last 20, of your
-main kind - Turbo or normal; a Turbo game never completes a goal set from
-normal games, or the other way round), not
-canned suggestions - e.g. "finish a game with fewer than N deaths" or "hit
-N GPM on {your most-played hero}," with N computed from your own recent
-average. Deliberately rule-based rather than AI-generated, since these are
-precise numeric thresholds where a model could plausibly invent a
-slightly-wrong number. A challenge only completes when a real subsequent
-match actually clears the bar (checked against freshly fetched matches, not
-self-reported) and links to that match. Each card shows "now -> goal" in the
-challenge's own units, next to a strip of your current form. Progress is
-saved in `localStorage`, tied to this browser rather than your account -
-there's no database, consistent with the rest of the app.
+A season (12 weeks, `src/lib/battlePass/season.ts`) of 30 levels: every
+1 000 points is a level, and key levels unlock a reward - ward and hero skins,
+a taunt, Dota Plus, a courier, an Immortal and an Arcana (placeholders until
+the real rewards and their cost against the pass price are decided).
+
+- **Weekly challenges.** Every Monday at 00:00 UTC (03:00 Moscow) the
+  signed-in player gets six challenges built from their own last 20 games,
+  each a bit above their current average: fewer deaths, KDA, GPM on their
+  main hero, last hits per minute (cores) or three clean games, two wins, and
+  an AI review of one of their own games. Targets are clamped, so games fed
+  on purpose can't make them trivial. Each is worth 250-800 points, about
+  2 950 a week - enough for level 30 by the end of the season with most
+  challenges done.
+- **Checked against real games.** A game counts only if it was played after
+  the challenge was issued and before its week ended, in public matchmaking
+  or ranked (not a lobby or a bot game), lasted 15+ minutes (Turbo 10+),
+  wasn't left, and is the same kind of game the target was set from (Turbo
+  or normal). The review challenge counts when the signed-in player opens
+  the AI analysis of their own game (once per game).
+- **On the server, tied to Steam login.** Points and rewards are worth real
+  items, so progress isn't kept in the browser: it lives in a JSON file
+  (`.data/battle-pass.json`, git-ignored; `BATTLE_PASS_STORE` moves it),
+  written one request at a time and atomically. The API
+  (`/api/battle-pass`, `/purchase`, `/claim`) only ever serves the session's
+  own account.
+- **Buying the pass - not connected yet.** One-time pass or subscription is
+  still to be decided, so the button reads "Скоро в продаже". Points still
+  accrue without it; rewards for levels already reached unlock once the pass
+  is active. `BATTLE_PASS_DEV_UNLOCK=1` lets a test setup activate it for
+  free - never set it in production.
+- **Claiming rewards.** Needs an active pass and the level. Item rewards ask
+  for the item/hero and a Steam trade link, whose `partner` must be the
+  player's own account; Dota Plus is sent as a Steam gift. A claim is stored
+  as "pending" for someone to send by hand - there's no admin page or trade
+  bot yet; the claims are in the store file.
 
 ### Dota Riddles (`/riddles`)
 
@@ -374,6 +427,12 @@ strength/weakness/tip cites one of those fields.
   `obs_log`/`sen_log` coordinates on a relative grid, not a map image.
 - The Meta page, hero builds and lane partners require `STRATZ_API_KEY`;
   without one they're omitted rather than approximated.
+- **Neutral items**: STRATZ currently returns no neutral item stats at all
+  (since the neutral item rework), so that block is hidden on hero pages
+  until it does.
+- **AI guide quality** is bounded by the local 8B model: the checks keep it
+  to real items, abilities and numbers, but its wording can still be plain
+  or repetitive (near-duplicate tips are dropped rather than shown).
 - STRATZ ties API keys to the IP address they were issued from. A
   "different IP Addresses" (403) error means the machine's outbound IP has
   changed since the key was generated - regenerate it at stratz.com/api.
@@ -404,10 +463,11 @@ strength/weakness/tip cites one of those fields.
   doesn't expose one. Live tournament coverage is also sparse (most live pro
   games aren't tracked by OpenDota's spectate feed), so "Live now" is often
   empty even during an active tournament.
-- **Challenges** progress lives in `localStorage`: it's per-browser, not
-  per-account - switching devices or browsers starts fresh. Verification
-  only looks at your most recent 20 matches fetched at the time you check
-  back, so a qualifying game outside that window won't be picked up.
+- **Battle pass** progress is a JSON file on the server: fine for one
+  server, but it needs a database before the app runs on several. Games are
+  credited when the player opens the pass page (the last 50 games are
+  checked), and only if their Dota profile exposes public match data.
+  Payment and reward delivery aren't connected yet (see Battle pass above).
 - **No true net-worth-over-time series**: OpenDota's public match data only
   has end-of-game net worth per player, not a per-minute history - the Full
   Match net worth chart is a sorted bar chart of final values (100% real),
@@ -431,7 +491,8 @@ src/
     heroes/, heroes/[heroId]/ hero grid + hero page (build, abilities, matchups, AI guide)
     tournaments/              Tournament Tracker (live + recent results)
     matches/[matchId]/        account-less match entry point (redirects)
-    challenges/               Training Challenges
+    challenges/               Battle pass (season, weekly challenges, rewards)
+    api/battle-pass/          battle pass state, purchase (not connected yet), reward claims
     riddles/                  Dota Riddles + Map Guide
     player/[accountId]/       profile (Overview + Match History)
     player/[accountId]/match/[matchId]/   match detail (3 tabs)
@@ -442,7 +503,7 @@ src/
     steamId.ts                    Steam32/64/URL and match-ID parsing
     constants.ts, heroAbilities.ts  hero/item/rank/ability lookups (dotaconstants)
     riddles.ts, mapGuides.ts        hand-authored coaching content
-    challenges.ts, challengeStorage.ts   rule-based challenge generation + localStorage
+    battlePass/                     battle pass: season and rewards, weekly challenges, server-side store, service
     metrics/                        raw data -> grounded metrics (match, trend, role comparison, match story, hero build, signature hero, draft insights, pro comparison, tournaments, skill build)
     coach/                           prompt + schema + Ollama client for the AI coach
   components/                UI

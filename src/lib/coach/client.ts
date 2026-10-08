@@ -3,6 +3,7 @@ import type {
   CrossMatchPatterns,
   DraftInsights,
   HeroAbility,
+  HeroBuildOverview,
   HeroGuideReport,
   HeroRoleOverview,
   MatchAnalysis,
@@ -14,17 +15,17 @@ import type {
   TrendMetrics,
 } from "../types";
 import type { HeroPerformanceSummary } from "../metrics/signatureHero";
-import { buildMatchCoachReportTool, coachReportTool, heroGuideTool, powerSpikeTool } from "./schema";
+import { buildHeroGuideTool, buildMatchCoachReportTool, coachReportTool, powerSpikeTool } from "./schema";
 import {
   SYSTEM_PROMPT,
   buildHeroCoachPrompt,
-  buildHeroGuidePrompt,
   buildMatchStoryCoachPrompt,
   buildProComparisonPrompt,
   buildTrendCoachPrompt,
   buildTrendData,
 } from "./prompt";
 import { keepGroundedFindings } from "./grounding";
+import { assembleHeroGuide, buildHeroGuidePrompt, buildHeroGuideSystemPrompt, guideItems, type RawHeroGuide } from "./heroGuide";
 import { trendPriorities, trendStrengths } from "./trendFindings";
 import {
   assembleMatchReport,
@@ -444,17 +445,34 @@ export async function coachProComparison(
   return tidy(report);
 }
 
-export async function coachHeroGuide(
-  heroName: string,
-  abilities: HeroAbility[],
-  roleOverview: HeroRoleOverview,
-  matchups: DraftInsights
-): Promise<HeroGuideReport> {
-  const report = await runCoach<HeroGuideReport>(
-    buildHeroGuidePrompt(heroName, abilities, roleOverview, matchups),
-    heroGuideTool
+export async function coachHeroGuide(args: {
+  heroId: number;
+  heroName: string;
+  position: string;
+  roleLabel: string;
+  abilities: HeroAbility[];
+  roleOverview: HeroRoleOverview;
+  matchups: DraftInsights | null;
+  build: HeroBuildOverview | null;
+}): Promise<HeroGuideReport> {
+  const prompt = buildHeroGuidePrompt(args);
+  const raw = await runCoach<RawHeroGuide>(
+    prompt,
+    buildHeroGuideTool(guideItems(args.build).map((i) => i.itemName)),
+    buildHeroGuideSystemPrompt(args.heroName, args.roleLabel)
   );
-  return tidy(report);
+  // Checked against the real build and ability kits: a sentence naming an
+  // item the role doesn't build, or an ability on the wrong hero, is dropped.
+  return tidy(
+    assembleHeroGuide(tidy(raw), {
+      heroId: args.heroId,
+      position: args.position,
+      roleLabel: args.roleLabel,
+      build: args.build,
+      matchups: args.matchups,
+      source: prompt,
+    })
+  );
 }
 
 export async function coachPowerSpike(

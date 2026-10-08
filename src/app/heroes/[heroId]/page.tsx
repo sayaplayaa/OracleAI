@@ -11,12 +11,10 @@ import { heroRoleTagRu } from "@/lib/heroTags";
 import { pluralRu } from "@/lib/format";
 import { attributeColor, attributeNameRu } from "@/components/AttributeBadge";
 import { HeroAbilityList } from "@/components/HeroAbilityList";
-import { HeroBuildPanel } from "@/components/HeroBuildPanel";
+import { HeroGuideView } from "@/components/HeroGuideView";
 import { MatchupList } from "@/components/MatchupList";
-import { HeroGuidePanel } from "@/components/HeroGuidePanel";
 import { PageContainer } from "@/components/PageContainer";
 import { BannerStat, Breadcrumbs } from "@/components/PageHeader";
-import { Tabs } from "@/components/Tabs";
 import type { RolePickStat } from "@/lib/types";
 
 function parseHeroId(raw: string): number | null {
@@ -125,8 +123,8 @@ export default async function HeroGuidePage({ params, searchParams }: PageProps<
     roleOverview.roles.find((r) => r.position === requested)?.position ??
     [...roleOverview.roles].sort((a, b) => b.games - a.games)[0]?.position ??
     null;
-  // A ?pos= link (from the Meta page) is about the build, so open that tab.
-  const initialTab = typeof tab === "string" ? tab : requested ? "build" : undefined;
+  // A ?pos= link (from the Meta page) is about the build: scroll to it.
+  const initialTab = typeof tab === "string" ? tab : requested ? "build" : null;
 
   const matchupsContent = draftInsights ? (
     <div className="grid lg:grid-cols-3 gap-4 items-start">
@@ -172,23 +170,15 @@ export default async function HeroGuidePage({ params, searchParams }: PageProps<
 
       <HeroBanner heroId={heroId} roles={roleOverview.roles} />
 
-      <Tabs
-        initial={initialTab}
-        tabs={[
-          {
-            id: "build",
-            label: "Сборка",
-            content: <HeroBuildPanel heroId={heroId} roles={roleOverview.roles} initialPosition={initialPosition} />,
-          },
-          {
-            id: "abilities",
-            label: "Способности",
-            badge: abilities.length || undefined,
-            content: <HeroAbilityList abilities={abilities} />,
-          },
-          { id: "matchups", label: "Матчапы", content: matchupsContent },
-          { id: "guide", label: "ИИ-гайд", content: <HeroGuidePanel heroId={heroId} heroName={heroName} /> },
-        ]}
+      <HeroGuideView
+        heroId={heroId}
+        heroName={heroName}
+        roles={roleOverview.roles}
+        initialPosition={initialPosition}
+        initialTab={initialTab}
+        abilities={<HeroAbilityList abilities={abilities} />}
+        abilityCount={abilities.length}
+        matchups={matchupsContent}
       />
     </PageContainer>
   );
