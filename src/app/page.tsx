@@ -63,7 +63,7 @@ const FEATURES: { title: string; text: string; icon: React.ReactNode }[] = [
 ];
 
 const TOOLS = [
-  { href: "/drafts", title: "Мета недели", text: "Лучшие герои на каждой позиции на Легенде и выше." },
+  { href: "/drafts", title: "Мета патча", text: "Лучшие герои на каждой позиции на текущем патче, Легенда и выше." },
   { href: "/heroes", title: "Гайды по героям", text: "Сборка под роль, таланты, матчапы и ИИ-гайд." },
   { href: "/tournaments", title: "Турниры", text: "Свежие про-матчи и игры, идущие прямо сейчас." },
   { href: "/challenges", title: "Боевой пропуск", text: "Испытания по твоим играм дают уровни, уровни - скины и Dota Plus." },

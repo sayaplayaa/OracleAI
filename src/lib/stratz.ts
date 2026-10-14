@@ -323,41 +323,210 @@ export function getHeroPositionStats(heroId: number) {
   });
 }
 
-const ALL_HERO_STATS_QUERY = `query AllHeroPositionStats($heroIds: [Short], $brackets: [RankBracketBasicEnum]) {
-  heroStats {
-    stats(heroIds: $heroIds, groupByPosition: true, bracketBasicIds: $brackets, maxTime: 0) {
-      heroId
-      position
-      matchCount
-      winCount
-    }
-  }
-}`;
+export interface StratzGameVersion {
+  id: number;
+  name: string;
+  // Unix seconds the patch went live.
+  releasedAt: number;
+}
 
+/** The patch that's live right now: the newest STRATZ game version already released. */
+export function getCurrentGameVersion() {
+  return cached(`stratz:current-game-version`, HOUR, async () => {
+    const data = await graphql<{
+      constants: { gameVersions: { id: number; name: string; asOfDateTime: number }[] | null };
+    }>(`query GameVersions { constants { gameVersions { id name asOfDateTime } } }`);
+    const nowSeconds = Date.now() / 1000;
+    const live = (data.constants.gameVersions ?? [])
+      .filter((v) => v.asOfDateTime <= nowSeconds)
+      .sort((a, b) => b.asOfDateTime - a.asOfDateTime)[0];
+    if (!live) {
+      throw new StratzError("STRATZ не вернул список патчей");
+    }
+    return { id: live.id, name: live.name, releasedAt: live.asOfDateTime } satisfies StratzGameVersion;
+  });
+}
+
+export interface PatchHeroStats {
+  patch: StratzGameVersion;
+  // Unix seconds the counted games start from (a STRATZ week boundary).
+  since: number;
+  // The patch is younger than its release week: the only bucket holding its
+  // games also holds the last days of the previous patch.
+  includesPreviousPatch: boolean;
+  // Summed over every counted week, one row per hero and position.
+  stats: StratzHeroPositionStat[];
+}
+
+// STRATZ buckets `stats` by week: weeks start Thursday 00:00 UTC (unix epoch
+// aligned), the `week` argument is that start in unix seconds.
+const WEEK_SECONDS = 7 * 24 * 60 * 60;
+// Passing all ~127 hero IDs in a single `stats` call makes STRATZ's resolver
+// fail outright ("Error trying to resolve field 'stats'").
 const HERO_STATS_BATCH_SIZE = 20;
+// Weeks fetched as aliased `stats` fields of one query (16 answered in <1 s).
+const WEEKS_PER_REQUEST = 8;
 
 /**
- * Same per-position pick/win data as getHeroPositionStats, for every hero at
- * once - powers the Meta tier list. Batched: passing all ~127 hero IDs in a
- * single `stats` call makes STRATZ's resolver fail outright ("Error trying
- * to resolve field 'stats'"), so this chunks the request and merges results.
+ * Per-position pick/win totals for every hero on the patch that's live now -
+ * powers the Meta page. STRATZ's own per-patch aggregate (`winGameVersion`)
+ * stopped updating at 7.40, so this sums the weekly `stats` buckets instead:
+ * every week that started after the release. The release week is mixed with
+ * the previous patch and only used while there is no other.
  */
-export function getAllHeroStats(heroIds: number[]) {
-  return cached(`stratz:all-hero-positions:v3`, 6 * HOUR, async () => {
-    const batches: number[][] = [];
-    for (let i = 0; i < heroIds.length; i += HERO_STATS_BATCH_SIZE) {
-      batches.push(heroIds.slice(i, i + HERO_STATS_BATCH_SIZE));
-    }
+export async function getPatchHeroStats(heroIds: number[]): Promise<PatchHeroStats> {
+  const patch = await getCurrentGameVersion();
+  const currentWeek = Math.floor(Date.now() / 1000 / WEEK_SECONDS);
+  const firstCleanWeek = Math.ceil(patch.releasedAt / WEEK_SECONDS);
+  const includesPreviousPatch = firstCleanWeek > currentWeek;
+  const firstWeek = includesPreviousPatch ? currentWeek : firstCleanWeek;
 
-    const results: StratzHeroPositionStat[] = [];
-    for (const batch of batches) {
-      const data = await graphql<{
-        heroStats: { stats: StratzHeroPositionStat[] };
-      }>(ALL_HERO_STATS_QUERY, { heroIds: batch, brackets: META_BRACKETS });
-      results.push(...data.heroStats.stats);
+  const stats = await cached(
+    `stratz:patch-hero-positions:${patch.id}:${firstWeek}-${currentWeek}`,
+    6 * HOUR,
+    async () => {
+      const weekStarts: number[] = [];
+      for (let week = firstWeek; week <= currentWeek; week++) weekStarts.push(week * WEEK_SECONDS);
+
+      const totals = new Map<string, StratzHeroPositionStat>();
+      for (let i = 0; i < heroIds.length; i += HERO_STATS_BATCH_SIZE) {
+        const batch = heroIds.slice(i, i + HERO_STATS_BATCH_SIZE);
+        for (let j = 0; j < weekStarts.length; j += WEEKS_PER_REQUEST) {
+          const fields = weekStarts
+            .slice(j, j + WEEKS_PER_REQUEST)
+            .map(
+              (start) =>
+                `w${start}: stats(heroIds: $heroIds, groupByPosition: true, bracketBasicIds: $brackets, maxTime: 0, week: ${start}) {
+                  heroId
+                  position
+                  matchCount
+                  winCount
+                }`
+            )
+            .join("\n");
+          const data = await graphql<{ heroStats: Record<string, StratzHeroPositionStat[] | null> }>(
+            `query PatchHeroPositionStats($heroIds: [Short], $brackets: [RankBracketBasicEnum]) {
+              heroStats { ${fields} }
+            }`,
+            { heroIds: batch, brackets: META_BRACKETS }
+          );
+          for (const rows of Object.values(data.heroStats)) {
+            for (const row of rows ?? []) {
+              if (!row.position) continue;
+              const key = `${row.heroId}:${row.position}`;
+              const total = totals.get(key);
+              if (total) {
+                total.matchCount += row.matchCount;
+                total.winCount += row.winCount;
+              } else {
+                totals.set(key, { ...row });
+              }
+            }
+          }
+        }
+      }
+      return [...totals.values()];
     }
-    return results;
+  );
+
+  return { patch, since: firstWeek * WEEK_SECONDS, includesPreviousPatch, stats };
+}
+
+// One high-MMR game on the hero, as STRATZ parsed it from the replay.
+export interface StratzReplayGame {
+  matchId: number;
+  gameVersionId: number;
+  won: boolean;
+  durationSeconds: number;
+  position: string | null;
+  // Abilities and talents, in the order they were learned.
+  abilityIds: number[];
+  // Every finished item bought, with the second it was bought at.
+  purchases: { time: number; itemId: number }[];
+  enemyHeroIds: number[];
+}
+
+interface StratzReplayPlayer {
+  heroId: number;
+  isRadiant: boolean;
+  isVictory: boolean;
+  position: string | null;
+  steamAccountId: number | null;
+  abilities: { abilityId: number }[] | null;
+  stats: { itemPurchases: { time: number; itemId: number }[] | null } | null;
+}
+
+// STRATZ answers `match` with whole replays; more at once trips its query
+// complexity limit.
+const REPLAYS_PER_REQUEST = 10;
+
+/**
+ * The newest high-MMR (Divine/Immortal) games on this hero in this position
+ * that STRATZ parsed - the games its own "guides" are built from. STRATZ
+ * only hands out the latest 10; the caller keeps the ones it has seen.
+ * Item purchases come from the player's stats (finished items with their
+ * second), which unlike playback data don't need a replay rebuild.
+ */
+export function getHeroHighMmrReplays(heroId: number, position: string) {
+  return cached(`stratz:hero-replays:${heroId}:${position}`, 3 * HOUR, async () => {
+    const list = await graphql<{
+      heroStats: { guide: { guides: { matchId: number; steamAccountId: number }[] | null }[] | null };
+    }>(
+      `query HeroGuideGames($heroId: Short!, $position: MatchPlayerPositionType) {
+        heroStats { guide(heroId: $heroId, positionId: $position, take: 10) { guides { matchId steamAccountId } } }
+      }`,
+      { heroId, position }
+    );
+    const guides = (list.heroStats.guide ?? []).flatMap((g) => g.guides ?? []);
+    const games: StratzReplayGame[] = [];
+    for (let i = 0; i < guides.length; i += REPLAYS_PER_REQUEST) {
+      const batch = guides.slice(i, i + REPLAYS_PER_REQUEST);
+      const fields = batch
+        .map(
+          (g, n) => `m${n}: match(id: ${Math.trunc(g.matchId)}) {
+            id gameVersionId durationSeconds
+            players { heroId isRadiant isVictory position steamAccountId abilities { abilityId } stats { itemPurchases { time itemId } } }
+          }`
+        )
+        .join("\n");
+      const data = await graphql<Record<string, { id: number; gameVersionId: number; durationSeconds: number; players: StratzReplayPlayer[] } | null>>(
+        `{ ${fields} }`
+      );
+      batch.forEach((g, n) => {
+        const match = data[`m${n}`];
+        const me = match?.players.find((p) => p.steamAccountId === g.steamAccountId) ?? match?.players.find((p) => p.heroId === heroId);
+        const purchases = me?.stats?.itemPurchases ?? [];
+        if (!match || !me || me.heroId !== heroId || purchases.length === 0) return;
+        games.push({
+          matchId: match.id,
+          gameVersionId: match.gameVersionId,
+          won: me.isVictory,
+          durationSeconds: match.durationSeconds,
+          position: me.position,
+          abilityIds: (me.abilities ?? []).map((a) => a.abilityId),
+          purchases: [...purchases].sort((a, b) => a.time - b.time),
+          enemyHeroIds: match.players.filter((p) => p.isRadiant !== me.isRadiant).map((p) => p.heroId),
+        });
+      });
+    }
+    return games;
   });
+}
+
+// The hero level an ability reached its last level at, one row per ability and level.
+export interface StratzAbilityMaxLevel {
+  abilityId: number;
+  level: number;
+  matchCount: number;
+  winCount: number;
+}
+
+// Games that lasted at least `time` minutes and the wins among them, one row
+// per minute up to 35 (time 0 is every game).
+export interface StratzGameMinuteStat {
+  time: number;
+  matchCount: number;
+  winCount: number;
 }
 
 export interface StratzHeroBuild {
@@ -366,15 +535,18 @@ export interface StratzHeroBuild {
   boots: StratzBootStat[];
   neutralItems: StratzNeutralItemStat[];
   talents: StratzTalentStat[];
+  abilityMaxLevels: StratzAbilityMaxLevel[];
+  gameMinutes: StratzGameMinuteStat[];
 }
 
 /**
  * Current-week item/talent build data for a hero at one position - the same
- * "last 7-8 days" window D2PT itself uses. Same Legend+ brackets as the role
- * stats, so item counts and game counts describe the same games.
+ * "last 7-8 days" window D2PT itself uses - plus when each ability gets maxed
+ * and how the role's win rate moves with game length. Same Legend+ brackets
+ * as the role stats, so item counts and game counts describe the same games.
  */
 export function getHeroBuild(heroId: number, position: string) {
-  return cached(`stratz:hero-build:${heroId}:${position}:v2`, 6 * HOUR, async () => {
+  return cached(`stratz:hero-build:${heroId}:${position}:v3`, 6 * HOUR, async () => {
     const data = await graphql<{ heroStats: StratzHeroBuild }>(
       `query HeroBuild($heroId: Short!, $positions: [MatchPlayerPositionType], $brackets: [RankBracketBasicEnum]) {
         heroStats {
@@ -411,6 +583,17 @@ export function getHeroBuild(heroId: number, position: string) {
             matchCount
             winCount
           }
+          abilityMaxLevels: abilityMaxLevel(heroId: $heroId, positionIds: $positions, bracketBasicIds: $brackets) {
+            abilityId
+            level
+            matchCount
+            winCount
+          }
+          gameMinutes: stats(heroIds: [$heroId], positionIds: $positions, bracketBasicIds: $brackets, groupByTime: true) {
+            time
+            matchCount
+            winCount
+          }
         }
       }`,
       { heroId, positions: [position], brackets: META_BRACKETS }
@@ -425,6 +608,8 @@ export function getHeroBuild(heroId: number, position: string) {
       boots: data.heroStats.boots ?? [],
       neutralItems: data.heroStats.neutralItems ?? [],
       talents: data.heroStats.talents ?? [],
+      abilityMaxLevels: data.heroStats.abilityMaxLevels ?? [],
+      gameMinutes: data.heroStats.gameMinutes ?? [],
     };
   });
 }

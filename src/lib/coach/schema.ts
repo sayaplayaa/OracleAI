@@ -140,69 +140,166 @@ export function buildMatchCoachReportTool(phaseIds: string[]) {
   };
 }
 
-// The hero guide for one role. Item tips pick their item from the role's real
-// build (an enum), so the model can't rename an item or bring one in from
-// memory; what each item does and when to build it is what it writes.
-export function buildHeroGuideTool(itemNames: string[]) {
+// The hero guide for one role. Items and abilities are picked from enums of
+// the role's real build and the hero's real kit, so the model can't rename
+// one or bring one in from memory; it writes why and when.
+export function buildHeroGuideTool(args: {
+  earlyItems: string[];
+  coreItems: string[];
+  lateItems: string[];
+  abilities: string[];
+  // The skill build was read from replays, so there's something to explain.
+  hasSkillBuild: boolean;
+}) {
+  const { earlyItems, coreItems, lateItems, abilities, hasSkillBuild } = args;
+  const NO_ABILITY = "—";
+  const earlyItemTips = {
+    type: "array",
+    items: {
+      type: "object",
+      properties: {
+        item: { type: "string", enum: earlyItems, description: "Предмет линии - ровно как в списке." },
+        why: {
+          type: "string",
+          description:
+            "1-2 предложения на русском: зачем он этому герою на линии и когда брать его, а когда альтернативу из данных (против какой линии, после какой минуты).",
+        },
+      },
+      required: ["item", "why"],
+      additionalProperties: false,
+    },
+    minItems: Math.min(1, earlyItems.length),
+    maxItems: Math.min(3, earlyItems.length),
+    description: "Главные предметы линии: зачем каждый и чем его заменить.",
+  };
+  const skillTips = {
+    type: "array",
+    items: findingSchema,
+    minItems: 1,
+    maxItems: 3,
+    description:
+      "Почему прокачка из разбора игр именно такая: что даёт способность на этом уровне, когда отходят от обычного порядка. Не меняй порядок из данных; в metric - уровни и доля игр из разбора.",
+  };
   const itemTips = {
     type: "array",
     items: {
       type: "object",
       properties: {
-        item: { type: "string", enum: itemNames, description: "Предмет из сборки - ровно как в списке." },
+        item: { type: "string", enum: coreItems, description: "Предмет основы сборки - ровно как в списке." },
+        ability: {
+          type: "string",
+          enum: [...abilities, NO_ABILITY],
+          description: `Способность героя, которую предмет усиливает сильнее всего; «${NO_ABILITY}», если ни одну.`,
+        },
         why: {
           type: "string",
           description:
-            "1-2 предложения на русском: что этот предмет даёт именно этому герою - какую его способность усиливает или какую слабость закрывает. Только по описанию предмета из данных.",
+            "1-2 предложения на русском: что меняет предмет именно у этого героя - как он работает вместе с этой способностью или какую слабость героя закрывает. По описанию предмета и способности из данных, без общих слов.",
         },
         whatToDo: {
           type: "string",
-          description: "1 предложение на русском: что делать, когда предмет куплен - куда идти, какую цель брать, когда драться.",
+          description:
+            "1 предложение на русском: что делать сразу после покупки (куда идти, кого ловить, когда драться) и к какой минуте его нужно успеть собрать - по таймингу из данных.",
         },
       },
-      required: ["item", "why", "whatToDo"],
+      required: ["item", "ability", "why", "whatToDo"],
       additionalProperties: false,
     },
-    minItems: Math.min(3, itemNames.length),
-    maxItems: 6,
-    description: "Обувь и ключевые предметы этой роли в их порядке.",
+    minItems: Math.min(2, coreItems.length),
+    maxItems: Math.min(5, coreItems.length),
+    description: "Основа сборки в её порядке.",
+  };
+  const lateItemTips = {
+    type: "array",
+    items: {
+      type: "object",
+      properties: {
+        item: { type: "string", enum: lateItems, description: "Предмет «по ситуации» - ровно как в списке." },
+        when: {
+          type: "string",
+          description:
+            "1 предложение на русском: в какой игре брать именно его - против каких героев или способностей противника. Опирайся на «разбор игр» у предмета (что было у врагов, когда его брали); если разбора нет - на описание предмета.",
+        },
+      },
+      required: ["item", "when"],
+      additionalProperties: false,
+    },
+    minItems: Math.min(2, lateItems.length),
+    maxItems: Math.min(4, lateItems.length),
+    description: "Поздние варианты и ситуативные предметы: когда какой брать.",
+  };
+  const tricks = {
+    type: "array",
+    items: {
+      type: "object",
+      properties: {
+        ability: { type: "string", enum: abilities, description: "Способность, на которой строится приём." },
+        trick: {
+          type: "string",
+          description:
+            "1-2 предложения на русском: неочевидный приём на этом герое - из примечания к способности, улучшения Aghanim's или сочетания способности с предметом сборки. Что именно сделать и что это даёт.",
+        },
+      },
+      required: ["ability", "trick"],
+      additionalProperties: false,
+    },
+    minItems: 2,
+    maxItems: 4,
+    description: "Фишки героя, которые знают сильные игроки и не знают новички.",
   };
   return {
     name: "submit_hero_guide",
     description:
-      "Отправить гайд по герою Dota 2 на русском языке для одной роли. Каждый совет опирается на реальную способность, предмет из сборки или число из данных.",
+      "Отправить гайд по герою Dota 2 на русском языке для одной роли. Каждый совет - про этого героя: его способность, предмет из его сборки или конкретного противника.",
     input_schema: {
       type: "object" as const,
       properties: {
         identity: {
           type: "string",
-          description: "2-3 предложения на русском: как герой играет в этой роли и на чём строится его сила - по его способностям и сборке.",
+          description:
+            "2-3 предложения на русском: план игры на этом герое в этой роли - на чём строится сила, к какой минуте и какому предмету герой становится опасен, выгодна ли ему долгая игра (по данным о длине игры).",
         },
-        ...(itemNames.length > 0 ? { itemTips } : {}),
+        ...(earlyItems.length > 0 ? { earlyItems: earlyItemTips } : {}),
+        ...(coreItems.length > 0 ? { itemTips } : {}),
+        ...(lateItems.length > 0 ? { lateItems: lateItemTips } : {}),
+        ...(hasSkillBuild ? { skillTips } : {}),
+        tricks,
         laningTips: {
           type: "array",
           items: findingSchema,
           minItems: 2,
-          maxItems: 4,
-          description: "Как играть линию на этом герое: по способностям, стартовому закупу и моменту 6 уровня.",
+          maxItems: 3,
+          description:
+            "Как стоять линию именно на этом герое: какую способность когда использовать, как размениваться, что меняет 6 уровень. Каждый пункт называет способность или предмет.",
         },
         teamfightTips: {
           type: "array",
           items: findingSchema,
           minItems: 2,
-          maxItems: 4,
-          description: "Как использовать способности героя в драках, каждый пункт - с конкретным эффектом способности.",
+          maxItems: 3,
+          description:
+            "Как этот герой входит в драку и что в ней делает: порядок способностей и предметов, кого бить. Каждый пункт называет способность или предмет.",
         },
         matchupTips: {
           type: "array",
           items: findingSchema,
-          minItems: 3,
-          maxItems: 5,
+          minItems: 2,
+          maxItems: 4,
           description:
             "Что делать против самых неудобных противников и как давить удобных: через опасные способности противника из данных и свои способности и предметы; в metric - винрейт.",
         },
       },
-      required: ["identity", ...(itemNames.length > 0 ? ["itemTips"] : []), "laningTips", "teamfightTips", "matchupTips"],
+      required: [
+        "identity",
+        ...(coreItems.length > 0 ? ["itemTips"] : []),
+        ...(earlyItems.length > 0 ? ["earlyItems"] : []),
+        ...(lateItems.length > 0 ? ["lateItems"] : []),
+        ...(hasSkillBuild ? ["skillTips"] : []),
+        "tricks",
+        "laningTips",
+        "teamfightTips",
+        "matchupTips",
+      ],
       additionalProperties: false,
     },
   };

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getHeroBuild, getHeroPositionStats } from "@/lib/stratz";
+import { getHeroProItemPopularity } from "@/lib/opendota";
 import { computeHeroBuildOverview } from "@/lib/metrics/heroBuild";
+import { withReplays } from "@/lib/metrics/replayBuild";
 
 export async function GET(
   req: NextRequest,
@@ -17,12 +19,14 @@ export async function GET(
   }
 
   try {
-    const [positionStats, build] = await Promise.all([
+    const [positionStats, build, proItems] = await Promise.all([
       getHeroPositionStats(heroId),
       getHeroBuild(heroId, position),
+      // Optional: the pro-scene strip just doesn't show without it.
+      getHeroProItemPopularity(heroId).catch(() => null),
     ]);
     const totalGames = positionStats.find((s) => s.position === position)?.matchCount ?? 0;
-    return NextResponse.json(computeHeroBuildOverview(heroId, position, totalGames, build));
+    return NextResponse.json(await withReplays(computeHeroBuildOverview(heroId, position, totalGames, build, proItems)));
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Не удалось загрузить сборку героя" },

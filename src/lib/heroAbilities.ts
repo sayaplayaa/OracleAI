@@ -1,4 +1,4 @@
-import { hero_abilities as heroAbilities, abilities } from "dotaconstants";
+import { hero_abilities as heroAbilities, abilities, aghs_desc as aghsDesc } from "dotaconstants";
 import { getHeroInternalName } from "./constants";
 import ru from "@/data/dota-ru.json";
 import type { HeroAbility } from "./types";
@@ -15,7 +15,23 @@ type AbilityConst = {
 };
 
 // Official Russian Dota client text (scripts/build-dota-ru.mjs).
-const ruAbilities = ru.abilities as Record<string, { desc?: string; headers?: Record<string, string> }>;
+const ruAbilities = ru.abilities as Record<
+  string,
+  { desc?: string; headers?: Record<string, string>; notes?: string[]; scepter?: string; shard?: string }
+>;
+
+type AghsConst = {
+  hero_name: string;
+  scepter_desc?: string;
+  scepter_skill_name?: string;
+  shard_desc?: string;
+  shard_skill_name?: string;
+};
+const aghsByHero = new Map((aghsDesc as unknown as AghsConst[]).map((a) => [a.hero_name, a]));
+
+function stripTags(text: string): string {
+  return text.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+}
 
 const heroAbilitiesByName = heroAbilities as unknown as Record<
   string,
@@ -107,15 +123,16 @@ const CYRILLIC = /\p{Script=Cyrillic}/u;
  * this app) - names, official descriptions, and numeric attributes, no
  * invented content. Descriptions and attribute labels are the official
  * Russian client text where it exists; ability names stay English, as they
- * do in the Russian client. Spacer/hidden entries (e.g. "generic_hidden",
- * which has no display name) are dropped.
+ * do in the Russian client. Each ability carries the client's mechanics notes
+ * and what Aghanim's Scepter and Shard change in it. Spacer/hidden entries
+ * (e.g. "generic_hidden", which has no display name) are dropped.
  */
 export function getHeroAbilityKit(heroId: number): HeroAbility[] {
   const internalName = getHeroInternalName(heroId);
   if (!internalName) return [];
   const keys = heroAbilitiesByName[internalName]?.abilities ?? [];
 
-  return keys
+  const kit = keys
     .map((key): HeroAbility | null => {
       const ability = abilitiesByKey[key];
       if (!ability?.dname) return null;
@@ -138,7 +155,21 @@ export function getHeroAbilityKit(heroId: number): HeroAbility[] {
             return { header, value: attribValue(a), localized: CYRILLIC.test(header) };
           }),
         iconUrl: ability.img ? `${CDN_BASE}${ability.img}` : "",
+        notes: localized?.notes ?? [],
+        ...(localized?.scepter ? { scepter: localized.scepter } : {}),
+        ...(localized?.shard ? { shard: localized.shard } : {}),
       };
     })
     .filter((a): a is HeroAbility => a !== null);
+
+  // No Russian text for an upgrade (its numbers live where the build script
+  // doesn't read them): the English one, on the ability it upgrades.
+  const aghs = aghsByHero.get(internalName);
+  for (const upgrade of ["scepter", "shard"] as const) {
+    const text = aghs?.[`${upgrade}_desc`];
+    if (!text || kit.some((a) => a[upgrade])) continue;
+    const target = kit.find((a) => a.name === aghs?.[`${upgrade}_skill_name`]);
+    if (target) target[upgrade] = stripTags(text);
+  }
+  return kit;
 }

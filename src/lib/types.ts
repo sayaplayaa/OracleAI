@@ -295,6 +295,27 @@ export interface OpenDotaLeague {
   tier: string | null;
 }
 
+// One pro player's game from OpenDota's explorer (parsed league matches):
+// what they bought and when, the order they learned abilities in, and every
+// player's hero, lane and GPM (to tell which position they played).
+export interface OpenDotaProReplayRow {
+  match_id: number;
+  player_slot: number;
+  purchase_log: { time: number; key: string }[] | null;
+  ability_upgrades_arr: number[] | null;
+  radiant_win: boolean;
+  duration: number;
+  players: { hero: number; slot: number; lane: number | null; gpm: number | null }[] | null;
+}
+
+// Item ID -> number of recent professional games that bought it in that phase.
+export interface OpenDotaItemPopularity {
+  start_game_items?: Record<string, number>;
+  early_game_items?: Record<string, number>;
+  mid_game_items?: Record<string, number>;
+  late_game_items?: Record<string, number>;
+}
+
 // One row from OpenDota's recent-matches-for-a-hero feed. Unlike /rankings
 // (top public-match performers, not necessarily pros), every match here has
 // a leagueid - these are genuine tournament/league games.
@@ -879,6 +900,12 @@ export interface HeroAbility {
   // and are only passed to the AI, not displayed.
   attributes: { header: string; value: string; localized: boolean }[];
   iconUrl: string;
+  // The game client's own notes on how it works ("pulls allies", "dodges
+  // projectiles") - the non-obvious mechanics a coach would point out.
+  notes: string[];
+  // What Aghanim's Scepter / Shard change in this ability.
+  scepter?: string;
+  shard?: string;
 }
 
 export interface HeroGuideReport {
@@ -886,10 +913,16 @@ export interface HeroGuideReport {
   // The role the guide is written for.
   position: string;
   roleLabel: string;
-  // The real build it was written from - shown as-is, never written by the model.
-  build: Pick<HeroBuildOverview, "games" | "earlyItems" | "boots" | "coreProgression"> | null;
+  // Laning items: why each one, and when to take the alternative.
+  earlyItems: HeroGuideEarlyItem[];
   // Boots and core items: why each one, and what to do once it's bought.
   itemTips: HeroGuideItemTip[];
+  // Situational items: in which game to pick which.
+  lateItems: HeroGuideLateItem[];
+  // Why the replays' skill build is what it is.
+  skillTips: CoachFinding[];
+  // The hero's own tricks, each tied to one of its abilities.
+  tricks: HeroGuideTrick[];
   laningTips: CoachFinding[];
   teamfightTips: CoachFinding[];
   matchupTips: CoachFinding[];
@@ -898,11 +931,27 @@ export interface HeroGuideReport {
 export interface HeroGuideItemTip {
   itemKey: string;
   itemName: string;
-  // From the build data, never from the model.
-  pickRate: number;
-  avgTimeSeconds: number;
+  // The hero's ability the item strengthens most, when there is one.
+  abilityName: string | null;
   why: string;
   whatToDo: string;
+}
+
+export interface HeroGuideEarlyItem {
+  itemKey: string;
+  itemName: string;
+  why: string;
+}
+
+export interface HeroGuideLateItem {
+  itemKey: string;
+  itemName: string;
+  when: string;
+}
+
+export interface HeroGuideTrick {
+  abilityName: string;
+  text: string;
 }
 
 // ---- Skill build (real, per-match ability level-up order) ----
@@ -1065,7 +1114,98 @@ export interface ItemProgressionPoint extends ItemStat {
   avgTimeSeconds: number;
   // Components bought on the way that are popular in their own right
   // (Skull Basher before Abyssal Blade), folded into this item.
-  builtFrom?: ItemStat[];
+  builtFrom?: ItemProgressionPoint[];
+  // How the win rate moves with the minute it's finished (full items only).
+  timing?: ItemTiming;
+  // Of the games that lasted until its usual minute, the share that built it:
+  // a 36th-minute item can't be in the games that ended at 30.
+  pickRateIfReached?: number;
+  // Core items only: built in most games long enough for it (the build's
+  // spine). Otherwise it's one late option among several.
+  isCore?: boolean;
+}
+
+// Win rate by the minute an item is finished. Faster items mostly come from
+// games already going well, so this is a benchmark to aim for, not a cause.
+export interface ItemTiming {
+  // The fastest quarter of purchases is done by this minute...
+  fastMinute: number;
+  fastWinRate: number;
+  // ...the slowest quarter comes at this minute or later.
+  slowMinute: number;
+  slowWinRate: number;
+  // The last minute it still wins as often as the hero does on this role;
+  // null when even the fastest purchases don't.
+  onTimeMinute: number | null;
+}
+
+// Games of this role that ended between these minutes (toMinute null: later).
+export interface GameLengthStat {
+  fromMinute: number;
+  toMinute: number | null;
+  games: number;
+  winRate: number;
+}
+
+// An ability and the hero level it usually reaches its last level at.
+export interface SkillOrderStep {
+  abilityKey: string;
+  abilityName: string;
+  iconUrl: string;
+  maxedAtLevel: number;
+  // Share of games it's maxed in at all.
+  share: number;
+}
+
+// ---- Builds read from parsed replays (pro games + Divine/Immortal games) ----
+
+export interface ReplaySkillStep {
+  level: number;
+  abilityKey: string;
+  abilityName: string;
+  isTalent: boolean;
+  // Share of the games (that made the same choices before it) taking it at this level.
+  share: number;
+}
+
+export interface ReplayItemPath {
+  // The first big items, in the order they were finished, with the median minute.
+  items: { itemKey: string; itemName: string; minute: number }[];
+  games: number;
+  wins: number;
+}
+
+// An item bought only in some games, and what was different in those games.
+export interface ReplaySituationalItem {
+  itemKey: string;
+  itemName: string;
+  games: number;
+  wins: number;
+  minute: number;
+  // An enemy trait the item answers, more common when it was bought: the
+  // average number of enemy heroes with it, in games with vs without the item.
+  traits: { key: string; label: string; withItem: number; withoutItem: number }[];
+  // Enemy heroes met far more often in the games that bought it.
+  enemies: { heroId: number; heroName: string; games: number }[];
+}
+
+export interface ReplayBuild {
+  games: number;
+  proGames: number;
+  highMmrGames: number;
+  wins: number;
+  // The usual skill build, level by level.
+  skillBuild: ReplaySkillStep[];
+  // The most common orders of the first big items.
+  paths: ReplayItemPath[];
+  situational: ReplaySituationalItem[];
+}
+
+// An item recent professional games bought on this hero (all positions).
+export interface ProItemStat {
+  itemKey: string;
+  itemName: string;
+  games: number;
 }
 
 export interface NeutralItemTier {
@@ -1091,8 +1231,13 @@ export interface MetaTierEntry {
   heroName: string;
   position: string;
   roleLabel: string;
+  // On this position, current patch, Legend+.
   games: number;
   winRate: number;
+  // Share of all games played on this position.
+  pickShare: number;
+  // Meta index, 0-100: win rate on the role blended with games on it.
+  index: number;
 }
 
 export interface HeroBuildOverview {
@@ -1111,6 +1256,17 @@ export interface HeroBuildOverview {
   situationalItems: ItemProgressionPoint[];
   neutralTiers: NeutralItemTier[];
   talents: TalentLevel[];
+  // Win rate on this role this week; null without data.
+  winRate: number | null;
+  // Win rate by game length: short, medium and long games.
+  gameLength: GameLengthStat[];
+  // Abilities in the order they're maxed.
+  skillOrder: SkillOrderStep[];
+  // Full items recent professional games buy on the hero, most common first.
+  proItems: ProItemStat[];
+  // Skill build, item order and situational picks read from parsed games of
+  // this patch; null when there are too few.
+  replays: ReplayBuild | null;
 }
 
 // ---- Role comparison (same-position head-to-head within one match) ----

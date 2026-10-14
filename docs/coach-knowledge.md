@@ -23,6 +23,12 @@ report is meant to avoid.
 | Uphill miss chance (25%, ranged attacks only) | [Liquipedia - Evasion](https://liquipedia.net/dota2/Evasion) |
 | Laning, role jobs, map zones | Ueio, BalloonDota, PainDota, Support Heaven coaching videos (the original basis of `roles.ts`) |
 | Ability and talent text and numbers | Valve's own game files, mirrored at [dotabuff/d2vpkr](https://github.com/dotabuff/d2vpkr) (`scripts/build-dota-ru.mjs`) |
+| Hero guide tricks: ability mechanics notes, what Aghanim's Scepter/Shard change per hero | The same game files (`DOTA_Tooltip_ability_*_Note*`, `*_scepter_description`, `*_shard_description`), filled with the ability's real values |
+| What pros build on a hero | [OpenDota](https://docs.opendota.com/) `/heroes/{id}/itemPopularity` (recent professional games) |
+| Item timing benchmarks, skill order, win rate by game length | [STRATZ](https://stratz.com/api) per-minute purchase, ability max level and game-minute stats, Legend+ |
+| Skill builds, item orders, situational picks | Parsed replays of the current patch: pro games via the [OpenDota explorer](https://docs.opendota.com/) (purchase logs, ability orders) and Divine/Immortal games via STRATZ guides (item purchases, ability orders) |
+| Item phases (start, lane, first farming item, power spikes, situational 4th+) | [prosettings.net - Dota 2 itemization for cores](https://prosettings.net/blog/dota-2-itemization/); D2PT's approach of reading builds from 7000+ MMR and pro games |
+| Counter items by threat (BKB vs control/magic, MKB vs evasion, Spirit Vessel/Shiva's/Skadi vs healing, Mjollnir/Radiance vs illusions, Linken's/Lotus vs targeted disables, Hex/Orchid/Nullifier vs blinks, Halberd/AC/Ghost vs physical) | [ludo.guide - Situational items and counter-building](https://www.ludo.guide/guide/dota-2/strategy-tactics/itemization-strategies/situational-items-counter-building), [prosettings.net](https://prosettings.net/blog/dota-2-itemization/); applied only where replays show the pick follows the threat (`src/lib/heroTraits.ts`) |
 
 ## Mechanics the advice relies on (checked)
 

@@ -24,10 +24,10 @@ export default async function DraftsPage({ searchParams }: PageProps<"/drafts">)
         eyebrow="Живые данные · STRATZ · Легенда и выше"
         title={
           <>
-            Мета <span className="text-accent">этой недели</span>
+            Мета <span className="text-accent">текущего патча</span>
           </>
         }
-        description="Кто сейчас реально выигрывает на каждой позиции. Нажми на героя - откроется его сборка, таланты и матчапы для этой роли."
+        description="Кто сильнее всех на каждой позиции на текущем патче: индекс учитывает и винрейт героя именно на этой роли, и сколько на ней сыграно игр. Нажми на героя - откроется его сборка, таланты и матчапы для этой роли."
         aside={
           <Link href="/heroes" className={secondaryButton}>
             Все герои и гайды →

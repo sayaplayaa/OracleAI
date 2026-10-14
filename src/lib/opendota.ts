@@ -10,7 +10,9 @@ import type {
   OpenDotaMatchupEntry,
   OpenDotaProPlayer,
   OpenDotaHeroLeagueMatch,
+  OpenDotaItemPopularity,
   OpenDotaProMatch,
+  OpenDotaProReplayRow,
   OpenDotaLiveMatch,
   OpenDotaLeague,
   ParseJobResponse,
@@ -249,6 +251,36 @@ export function getProPlayers() {
 export function getHeroLeagueMatches(heroId: number) {
   return cached(`heroLeagueMatches:${heroId}`, 30 * MINUTE, () =>
     request<OpenDotaHeroLeagueMatch[]>(`/heroes/${heroId}/matches`)
+  );
+}
+
+/**
+ * Every parsed professional game on this hero since `sinceUnix` (OpenDota's
+ * explorer: SQL over its parsed league matches) - each player's full
+ * purchase log and ability order, and the lanes/GPM of all ten players.
+ * One request; the rows are replays already analysed by OpenDota's parser.
+ */
+export function getHeroProReplays(heroId: number, sinceUnix: number) {
+  const hero = Math.trunc(heroId);
+  const since = Math.trunc(sinceUnix);
+  return cached(`proReplays:${hero}:${since}`, 6 * 60 * MINUTE, async () => {
+    const sql = `SELECT pm.match_id, pm.player_slot, pm.purchase_log, pm.ability_upgrades_arr, m.radiant_win, m.duration,
+      (SELECT json_agg(json_build_object('hero', o.hero_id, 'slot', o.player_slot, 'lane', o.lane_role, 'gpm', o.gold_per_min))
+         FROM player_matches o WHERE o.match_id = pm.match_id) AS players
+      FROM player_matches pm JOIN matches m USING(match_id)
+      WHERE pm.hero_id = ${hero} AND m.start_time >= ${since} AND pm.purchase_log IS NOT NULL
+      ORDER BY m.match_id DESC LIMIT 200`;
+    const data = await request<{ rows?: OpenDotaProReplayRow[]; err?: string }>(`/explorer?sql=${encodeURIComponent(sql)}`);
+    if (!data?.rows) throw new OpenDotaError(`OpenDota explorer: ${data?.err ?? "пустой ответ"}`);
+    return data.rows;
+  });
+}
+
+// How many recent professional games bought each item on this hero, by game
+// phase (item IDs as keys). All positions together.
+export function getHeroProItemPopularity(heroId: number) {
+  return cached(`heroItemPopularity:${heroId}`, 6 * 60 * MINUTE, () =>
+    request<OpenDotaItemPopularity>(`/heroes/${heroId}/itemPopularity`)
   );
 }
 

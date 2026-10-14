@@ -12,8 +12,8 @@ export const metadata: Metadata = {
 const TOOLS: { href: string; title: string; text: string; icon: React.ReactNode }[] = [
   {
     href: "/drafts",
-    title: "Мета этой недели",
-    text: "Лучшие герои на каждой позиции на ранге Легенда и выше - с поправкой на размер выборки (STRATZ).",
+    title: "Мета патча",
+    text: "Индекс героев на каждой позиции на текущем патче: винрейт и число игр на роли, ранг Легенда и выше (STRATZ).",
     icon: <path d="M3 17l5-5 4 4 8-9M14 7h6v6" />,
   },
   {

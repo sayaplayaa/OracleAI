@@ -10,9 +10,7 @@ import { computeDraftInsights } from "@/lib/metrics/draftInsights";
 import { heroRoleTagRu } from "@/lib/heroTags";
 import { pluralRu } from "@/lib/format";
 import { attributeColor, attributeNameRu } from "@/components/AttributeBadge";
-import { HeroAbilityList } from "@/components/HeroAbilityList";
 import { HeroGuideView } from "@/components/HeroGuideView";
-import { MatchupList } from "@/components/MatchupList";
 import { PageContainer } from "@/components/PageContainer";
 import { BannerStat, Breadcrumbs } from "@/components/PageHeader";
 import type { RolePickStat } from "@/lib/types";
@@ -123,46 +121,8 @@ export default async function HeroGuidePage({ params, searchParams }: PageProps<
     roleOverview.roles.find((r) => r.position === requested)?.position ??
     [...roleOverview.roles].sort((a, b) => b.games - a.games)[0]?.position ??
     null;
-  // A ?pos= link (from the Meta page) is about the build: scroll to it.
+  // A ?pos= link (from the Meta page) is about the build: scroll to the items.
   const initialTab = typeof tab === "string" ? tab : requested ? "build" : null;
-
-  const matchupsContent = draftInsights ? (
-    <div className="grid lg:grid-cols-3 gap-4 items-start">
-      <MatchupList
-        title={`Против кого ${heroName} слаб`}
-        note="Самые неудобные противники за всё время (OpenDota)."
-        matchups={draftInsights.toughestMatchups}
-        emptyMessage="Пока ни против одного героя не набралось достаточно игр."
-        accent="var(--color-status-critical)"
-      />
-      <MatchupList
-        title={`Против кого ${heroName} силён`}
-        note="Противники, которых герой обыгрывает чаще всего."
-        matchups={draftInsights.bestMatchups}
-        emptyMessage="Пока ни против одного героя не набралось достаточно игр."
-        accent="var(--color-status-good)"
-      />
-      <MatchupList
-        title="Лучшие напарники по линии"
-        note={
-          draftInsights.lanePosition
-            ? `STRATZ, ${draftInsights.lanePosition}, только текущая неделя - живая мета.`
-            : "Синергия на линии по данным STRATZ."
-        }
-        matchups={draftInsights.bestLanePartners}
-        emptyMessage={
-          draftInsights.lanePosition
-            ? "На этой неделе ни с одним напарником не набралось достаточно игр."
-            : "Нет данных о синергии на линии (нужен ключ STRATZ_API_KEY)."
-        }
-        accent="var(--color-series-blue)"
-      />
-    </div>
-  ) : (
-    <div className="bg-surface border border-border rounded-2xl p-6 text-sm text-ink-secondary">
-      OpenDota сейчас не отдаёт матчапы этого героя. Попробуй обновить страницу через минуту.
-    </div>
-  );
 
   return (
     <PageContainer className="space-y-6">
@@ -176,9 +136,8 @@ export default async function HeroGuidePage({ params, searchParams }: PageProps<
         roles={roleOverview.roles}
         initialPosition={initialPosition}
         initialTab={initialTab}
-        abilities={<HeroAbilityList abilities={abilities} />}
-        abilityCount={abilities.length}
-        matchups={matchupsContent}
+        abilities={abilities}
+        matchups={draftInsights}
       />
     </PageContainer>
   );

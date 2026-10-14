@@ -257,14 +257,30 @@ match report as before.
 
 ### Meta (`/drafts`)
 
-This week's strongest heroes per position (STRATZ, Legend and above,
-batched query - see limitations), rendered on the server: the leader of
-each position as a card, then the top 8 per position with a win-rate bar
-centered on 50%. Every hero links to its page with the build for that
-position open (`/heroes/{id}?pos=POSITION_N`). Old `/drafts?hero={id}` links
-redirect to the hero page.
+The current patch's heroes per position (STRATZ, Legend and above),
+rendered on the server: the leader of each position as a card, then every
+hero ranked on that position - top 8 shown, the rest behind "show more".
+Every hero links to its page with the build for that position open
+(`/heroes/{id}?pos=POSITION_N`). Old `/drafts?hero={id}` links redirect to
+the hero page.
 
-Every ranked list (meta, toughest/best matchups, best lane partners) is
+- **Patch window.** The live patch is the newest STRATZ game version
+  already released. STRATZ's own per-patch aggregate stopped updating at
+  7.40, so the page sums its weekly buckets (weeks start Thursday 00:00 UTC)
+  from the first week after the release. In a patch's first days the only
+  bucket is the release week, which still holds the previous patch's last
+  days - the page says so.
+- **Meta index (0-100).** 60% win rate on that exact role, relative to the
+  role's average (±5 pp spans the scale, small samples pulled toward the
+  average), 40% games on that role on a log scale (the role's most played
+  hero maxes it).
+- **Own positions only.** A hero is ranked on the position it's played on
+  most this patch, plus any other it's played on at least 75% as often. A
+  popular hero's rare off-role games (Necrophos as carry: 12% of its games)
+  don't put it on that list. Heroes under 0.2% of a role's games are left
+  out too.
+
+Every other ranked list (toughest/best matchups, best lane partners) is
 sorted by a Wilson score confidence interval, not raw win rate - a hero at
 100% over 3 games no longer outranks one at 58% over 5,000, and a hero rarely
 played in a role (e.g. Anti-Mage as Hard Support) doesn't get inflated by a
@@ -274,34 +290,76 @@ tiny lucky sample.
 
 `/heroes` is the hero grid grouped by primary attribute, as in the game,
 with search and attribute/role filters. Each hero page has a banner (week
-win rate, games, main role) and then everything on one page, in this order,
-with a sticky row of links to jump between the parts:
+win rate, games, main role) and then the whole guide as one page, read top
+to bottom - no tabs. The AI parts sit inside the data they explain:
 
 - **Role** - one picker (win rate and share of games per position) that
-  drives both the AI guide and the build below.
-- **AI guide, first** - so it never has to be looked for. One click writes
-  it for the selected role; once written it's kept on the server for 12 hours
-  and opens straight away for everyone. It's built from the role's real
-  build: the core items are shown from the data as they are, and the model
-  explains each one (what it gives this hero, what to do once it's bought),
-  plus laning, teamfights and matchups. What the model writes is checked:
-  item cards pick their item from the build itself (a fixed list, so no
-  renamed or remembered items); any sentence naming an item outside the
-  build - in English or transliterated ("блинк-даггер") - is dropped, as is
-  one that gives an opponent an ability it doesn't have, or a tip whose
-  numbers aren't in the data. Matchup tips get each opponent's real disables
-  (with cast range) to work from.
-- **Build** - the real STRATZ current-week build for that position (Legend+):
-  core items in their usual order with how often they're built and at which
-  minute, the components bought on the way ("через Skull Basher"), boots and
-  early items, starting items (with copies, "Iron Branch ×2"), talents (most
-  picked / highest win rate) and situational items. Talents read as the
-  Russian client shows them, with their real numbers ("+200 к радиусу Mana
-  Void") from Valve's ability files.
-- **Abilities** - every real ability (name, official description, numeric
-  attributes, icon), straight from `dotaconstants`' game-client data.
-- **Matchups** - toughest and easiest opponents (OpenDota) and best lane
-  partners (STRATZ).
+  drives everything below.
+- **Plan** - the AI coach's game plan for the hero in this role (or the
+  button that writes it), next to how the hero wins: win rate in games under
+  30, 30-35 and over 35 minutes, and the order its abilities are maxed
+  (STRATZ).
+- **Items**, by game phase:
+  - **Start and lane** - the starting items, then what's bought in the
+    first ~12 minutes in order (minute, share of games, win rate): cheap
+    items, the boots with the other boots players pick instead, early
+    optional picks (Vanguard on Axe) and the components bought on the way to
+    the first core item ("Perseverance - на пути к Battle Fury"). Boots are
+    part of the lane, not a category of their own.
+  - **Core** - the big items built in at least half the games long enough
+    for them, each with its win rate by purchase minute (fastest vs slowest
+    quarter of purchases) and, where the data shows one, the minute to have
+    it by ("успеть к 14′"); below, the orders the first three big items were
+    really finished in, from parsed games ("Battle Fury → Manta Style → Eye
+    of Skadi - 23 из 56, 65% побед").
+  - **By situation** - late options and situational items, each with what
+    the enemy team had in the parsed games that bought it ("у врагов больше
+    «контроль»: 3.1 против 2.2", "чаще против Earthshaker (4)").
+  - **How pros build it** - recent tournament games (OpenDota), with what
+    pubs of this role do with each of those items.
+- **Skill build** - level by level from parsed games of this patch (at each
+  level, what players with the same picks before chose; pale where under
+  75% agree), the talents chosen in them, and the STRATZ talent table.
+- **Abilities and mechanics** - every ability with its official Russian
+  description and values, the game client's own **mechanics notes**
+  ("Meat Hook pulls allies", "Blink dodges projectiles") and what **Aghanim's
+  Scepter and Shard** change in it; once the guide is written, the coach's
+  **tricks** for the hero on top.
+- **How to play** - the coach's lane and teamfight tips.
+- **Matchups** - toughest and easiest opponents (OpenDota), best lane
+  partners (STRATZ) and the coach's tips against them.
+
+Every item and skill decision comes from real games, never from the model's
+memory:
+- **Aggregates** - STRATZ, Legend+, this week, ~100 000 games a role: pick
+  rates, minutes, timing win rates, talents.
+- **Parsed replays of the current patch** (`src/lib/replays.ts`,
+  `metrics/replayBuild.ts`) - professional games from OpenDota's explorer
+  (full purchase logs and ability orders; the position worked out from lanes
+  and farm) and the newest Divine/Immortal games in the exact position from
+  STRATZ (the games its guides are built from). STRATZ only hands out the
+  latest 10, so the ones seen are kept in `.data/replays/` and the sample
+  grows with every refresh. From them: the skill build, the item orders, and
+  for situational items what the enemy had - each enemy hero's traits
+  (control, magic damage, evasion, invisibility, illusions, healing, blinks,
+  physical carry) are read from its real ability data (`src/lib/heroTraits.ts`)
+  and matched with the common counter-item list from community guides; a
+  difference is only claimed when the games show it (4+ games each way).
+
+The AI guide is written for players who know the basics. The prompt gives
+the model all of the above (with each item's effect and the hero's own
+Aghanim's upgrade, not the generic one), the kit with its mechanics notes
+and the matchups; it picks items and abilities from fixed lists of the real
+ones and is told to explain the replays' skill build, not change it. What it
+writes is checked: a sentence naming an item outside the data - in English
+or transliterated ("блинк-даггер") - is dropped, as is one that gives an
+opponent an ability it doesn't have or quotes a number (100+) the data
+doesn't have; any tip that names none of the hero's abilities, items or
+opponents ("следи за картой" fits every hero) is dropped, and so is a
+situational pick without a situation ("бери, когда нужно"). Big kits
+(Invoker) get a compact version of the data so the prompt and a ~2 800-token
+answer fit the default 8 192-token context. One guide per hero and role is
+kept on the server for 12 hours.
 
 How core items are worked out (the old list missed real core items):
 STRATZ answers with one row per item, per purchase (first copy, second...)
@@ -317,7 +375,11 @@ for Anti-Mage carry), which made every pick rate ~40% too high. Core = bought
 in 20%+ of games, ordered by median purchase minute; a component bought on
 the way to a popular item (Perseverance, Yasha, Skull Basher) is shown inside
 that item; cheap first-minutes items (Magic Wand, Wraith Band) are listed
-separately. The same build data feeds the match analysis' item timings.
+separately. Within the core items, the spine is what's built in at least
+half the games that lasted until the item's usual minute (Abyssal Blade on
+Anti-Mage: 44% of all games, 62% of those still going at minute 36); the
+rest are late options. The same build data feeds the match analysis' item
+timings.
 
 ### Tournaments (`/tournaments`)
 
@@ -440,7 +502,7 @@ strength/weakness/tip cites one of those fields.
   app-side fix, it's inherent to how STRATZ issues keys.
 - STRATZ's `stats` query fails outright if you pass too many hero IDs in one
   call (used for the Meta page) - already worked around by batching in
-  `getAllHeroStats`, but worth knowing if you extend it further.
+  `getPatchHeroStats`, but worth knowing if you extend it further.
 - Full-match extras (team gold/XP advantage graph, farm sparklines, wards,
   heatmap, item timeline, skill build, Match Story's timeline) require
   OpenDota to have parsed the replay; the in-page "Request full parse"
@@ -487,7 +549,7 @@ src/
     api/coach/                match, trends, match-story, hero, hero-guide, pro-comparison, power-spike AI reports
     api/hero/[heroId]/        matchups, roles, build (hero page Build tab)
     api/meta/                 meta tier list as JSON
-    drafts/                   Meta page (tier list per position)
+    drafts/                   Meta page (meta index per position, current patch)
     heroes/, heroes/[heroId]/ hero grid + hero page (build, abilities, matchups, AI guide)
     tournaments/              Tournament Tracker (live + recent results)
     matches/[matchId]/        account-less match entry point (redirects)

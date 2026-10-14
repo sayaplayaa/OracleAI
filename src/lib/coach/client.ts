@@ -25,7 +25,13 @@ import {
   buildTrendData,
 } from "./prompt";
 import { keepGroundedFindings } from "./grounding";
-import { assembleHeroGuide, buildHeroGuidePrompt, buildHeroGuideSystemPrompt, guideItems, type RawHeroGuide } from "./heroGuide";
+import {
+  assembleHeroGuide,
+  buildHeroGuidePrompt,
+  buildHeroGuideSystemPrompt,
+  guideToolArgs,
+  type RawHeroGuide,
+} from "./heroGuide";
 import { trendPriorities, trendStrengths } from "./trendFindings";
 import {
   assembleMatchReport,
@@ -102,6 +108,9 @@ const CONTEXT_STEPS = [4096, 8192, 12288, 16384];
 const DEFAULT_MAX_CTX = 8192;
 // Room for the answer; reports run ~600-1500 tokens.
 const RESPONSE_TOKENS = 1536;
+// The hero guide has more parts (lane, core and situational items, skill
+// build, tricks, three tip lists).
+const HERO_GUIDE_RESPONSE_TOKENS = 2816;
 // qwen3's tokenizer averages 2.7-2.8 characters per token on these prompts
 // (Russian text with embedded JSON, measured); 2.6 keeps a margin.
 const CHARS_PER_TOKEN = 2.6;
@@ -158,8 +167,8 @@ function ollamaConfig() {
 
 type OllamaConfig = ReturnType<typeof ollamaConfig>;
 
-function pickContext(promptChars: number, maxCtx: number): number {
-  const needed = Math.ceil(promptChars / CHARS_PER_TOKEN) + RESPONSE_TOKENS;
+function pickContext(promptChars: number, maxCtx: number, responseTokens: number): number {
+  const needed = Math.ceil(promptChars / CHARS_PER_TOKEN) + responseTokens;
   const numCtx = CONTEXT_STEPS.find((step) => step >= needed && step <= maxCtx) ?? maxCtx;
   if (needed > numCtx) {
     console.warn(
@@ -245,10 +254,10 @@ async function chatOnce(
   return { content, doneReason };
 }
 
-async function callOllama<T>(task: string, tool: ResponseSchema, systemPrompt: string): Promise<T> {
+async function callOllama<T>(task: string, tool: ResponseSchema, systemPrompt: string, responseTokens: number): Promise<T> {
   const config = ollamaConfig();
   const userPrompt = `${task}\n\n${responseFormatGuide(tool)}`;
-  const numCtx = pickContext(systemPrompt.length + userPrompt.length, config.maxCtx);
+  const numCtx = pickContext(systemPrompt.length + userPrompt.length, config.maxCtx, responseTokens);
   const remembered = placements.get(numCtx);
   const knownGpu =
     remembered && Date.now() - remembered.at < PLACEMENT_TTL_MS ? remembered.numGpu : undefined;
@@ -310,11 +319,12 @@ async function callOllama<T>(task: string, tool: ResponseSchema, systemPrompt: s
 async function runCoach<T>(
   userPrompt: string,
   tool: ResponseSchema,
-  systemPrompt: string = SYSTEM_PROMPT
+  systemPrompt: string = SYSTEM_PROMPT,
+  responseTokens: number = RESPONSE_TOKENS
 ): Promise<T> {
-  const first = await callOllama<T>(userPrompt, tool, systemPrompt);
+  const first = await callOllama<T>(userPrompt, tool, systemPrompt, responseTokens);
   if (russianShare(first) >= MIN_RUSSIAN_SHARE) return first;
-  const second = await callOllama<T>(userPrompt + RUSSIAN_REMINDER, tool, systemPrompt);
+  const second = await callOllama<T>(userPrompt + RUSSIAN_REMINDER, tool, systemPrompt, responseTokens);
   return russianShare(second) >= russianShare(first) ? second : first;
 }
 
@@ -458,8 +468,9 @@ export async function coachHeroGuide(args: {
   const prompt = buildHeroGuidePrompt(args);
   const raw = await runCoach<RawHeroGuide>(
     prompt,
-    buildHeroGuideTool(guideItems(args.build).map((i) => i.itemName)),
-    buildHeroGuideSystemPrompt(args.heroName, args.roleLabel)
+    buildHeroGuideTool(guideToolArgs(args.build, args.abilities)),
+    buildHeroGuideSystemPrompt(args.heroName, args.roleLabel),
+    HERO_GUIDE_RESPONSE_TOKENS
   );
   // Checked against the real build and ability kits: a sentence naming an
   // item the role doesn't build, or an ability on the wrong hero, is dropped.
@@ -468,6 +479,7 @@ export async function coachHeroGuide(args: {
       heroId: args.heroId,
       position: args.position,
       roleLabel: args.roleLabel,
+      abilities: args.abilities,
       build: args.build,
       matchups: args.matchups,
       source: prompt,

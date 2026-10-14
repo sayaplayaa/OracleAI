@@ -25,7 +25,7 @@ export default function HeroesGuidesPage() {
         description="Сборка предметов и таланты для каждой позиции, способности, сильные и слабые матчапы и ИИ-гайд - всё на одной странице героя. Данные OpenDota и STRATZ за эту неделю."
         aside={
           <Link href="/drafts" className={secondaryButton}>
-            Мета этой недели →
+            Мета патча →
           </Link>
         }
       />

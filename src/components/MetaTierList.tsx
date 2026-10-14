@@ -1,7 +1,13 @@
 import Image from "next/image";
 import Link from "next/link";
-import { getAllHeroStats } from "@/lib/stratz";
-import { computeMetaTierList, roleLabelForPosition } from "@/lib/metrics/heroBuild";
+import { getPatchHeroStats, type PatchHeroStats } from "@/lib/stratz";
+import {
+  computeMetaTierList,
+  META_INDEX_WIN_RATE_WEIGHT,
+  MIN_META_PICK_SHARE,
+  MIN_SHARE_OF_MAIN_POSITION,
+  roleLabelForPosition,
+} from "@/lib/metrics/heroBuild";
 import { getAllHeroes, getHeroImage } from "@/lib/constants";
 import { pluralRu } from "@/lib/format";
 import type { MetaTierEntry } from "@/lib/types";
@@ -9,6 +15,10 @@ import { HeroIcon } from "./HeroIcon";
 import { Notice, SectionHeading } from "./PageHeader";
 
 const POSITIONS = ["POSITION_1", "POSITION_2", "POSITION_3", "POSITION_4", "POSITION_5"];
+// The rest of each position's ranking sits behind "show more".
+const VISIBLE_PER_POSITION = 8;
+
+const compactNumber = new Intl.NumberFormat("ru-RU", { notation: "compact", maximumFractionDigits: 1 });
 
 function winColor(winRate: number): string {
   return winRate >= 0.5 ? "var(--color-status-good)" : "var(--color-status-critical)";
@@ -18,26 +28,45 @@ function heroBuildHref(entry: MetaTierEntry): string {
   return `/heroes/${entry.heroId}?pos=${entry.position}`;
 }
 
-function formatWinRate(winRate: number): string {
-  return `${(winRate * 100).toFixed(1)}%`;
+function formatPercent(value: number): string {
+  return `${(value * 100).toFixed(1)}%`;
 }
 
-/** Win rate bar centered on 50%: the 40-60% range fills the track. */
-function WinRateBar({ winRate }: { winRate: number }) {
-  const offset = Math.max(-1, Math.min(1, (winRate - 0.5) / 0.1));
-  const width = Math.abs(offset) * 50;
+function gamesLabel(games: number): string {
+  return `${games.toLocaleString("ru-RU")} ${pluralRu(games, ["игра", "игры", "игр"])}`;
+}
+
+// STRATZ dates are midnight UTC - formatting in local time can land on the day before.
+function formatDay(unixSeconds: number): string {
+  return new Date(unixSeconds * 1000).toLocaleDateString("ru-RU", { day: "numeric", month: "long", timeZone: "UTC" });
+}
+
+function entryTitle(e: MetaTierEntry): string {
+  return `${e.heroName}, ${e.roleLabel.toLowerCase()}: индекс ${e.index}, винрейт ${formatPercent(e.winRate)}, ${gamesLabel(e.games)} (${formatPercent(e.pickShare)} игр позиции)`;
+}
+
+function PatchStrip({ data }: { data: PatchHeroStats }) {
+  // Every match has ten heroes on positions.
+  const matches = Math.round(data.stats.reduce((sum, s) => sum + s.matchCount, 0) / 10);
+  // "4 млн матчей": after тыс./млн the noun is always plural genitive.
+  const matchesWord = matches >= 1000 ? "матчей" : pluralRu(matches, ["матч", "матча", "матчей"]);
   return (
-    <span className="relative block h-1 rounded-full bg-page overflow-hidden" aria-hidden>
-      <span className="absolute inset-y-0 left-1/2 w-px bg-ink-muted/40" />
-      <span
-        className="absolute inset-y-0 rounded-full"
-        style={{
-          left: offset >= 0 ? "50%" : `${50 - width}%`,
-          width: `${Math.max(width, 2)}%`,
-          background: winColor(winRate),
-        }}
-      />
-    </span>
+    <div className="bg-surface border border-border rounded-2xl px-5 py-4 flex flex-wrap items-center gap-x-6 gap-y-2">
+      <span className="font-display font-bold text-ink text-lg">
+        Патч <span className="text-accent">{data.patch.name}</span>
+      </span>
+      <span className="text-sm text-ink-secondary">В игре с {formatDay(data.patch.releasedAt)}</span>
+      <span className="text-sm text-ink-secondary">
+        ≈{compactNumber.format(matches)} {matchesWord} на ранге Легенда и выше
+        {data.includesPreviousPatch ? "" : ` с ${formatDay(data.since)}`}
+      </span>
+      {data.includesPreviousPatch && (
+        <p className="basis-full text-xs text-ink-muted leading-relaxed">
+          Патч вышел меньше недели назад. STRATZ считает игры по неделям, поэтому пока в выборку попадают и последние
+          дни прошлого патча - с началом новой недели останется только {data.patch.name}.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -46,6 +75,7 @@ function LeaderCard({ entry, index }: { entry: MetaTierEntry; index: number }) {
   return (
     <Link
       href={heroBuildHref(entry)}
+      title={entryTitle(entry)}
       className="group relative block bg-surface border border-border hover:border-accent/60 rounded-2xl overflow-hidden transition hover:-translate-y-0.5"
     >
       <div className="relative aspect-[16/9] bg-surface-raised overflow-hidden">
@@ -68,12 +98,16 @@ function LeaderCard({ entry, index }: { entry: MetaTierEntry; index: number }) {
       <div className="px-4 pb-4 -mt-6 relative">
         <p className="text-[11px] font-semibold uppercase tracking-wide text-accent">Лидер позиции</p>
         <h3 className="font-display font-bold text-lg text-ink truncate">{entry.heroName}</h3>
-        <div className="mt-2 flex items-baseline justify-between gap-2">
-          <span className="font-mono text-2xl tabular-nums" style={{ color: winColor(entry.winRate) }}>
-            {formatWinRate(entry.winRate)}
+        <div className="mt-2 flex items-end justify-between gap-2">
+          <span className="flex items-baseline gap-1.5">
+            <span className="font-mono text-2xl tabular-nums text-ink">{entry.index}</span>
+            <span className="text-[11px] text-ink-muted">индекс</span>
           </span>
-          <span className="text-xs text-ink-muted font-mono tabular-nums">
-            {entry.games.toLocaleString("ru-RU")} {pluralRu(entry.games, ["игра", "игры", "игр"])}
+          <span className="text-right text-xs font-mono tabular-nums leading-relaxed">
+            <span className="block" style={{ color: winColor(entry.winRate) }}>
+              {formatPercent(entry.winRate)}
+            </span>
+            <span className="block text-ink-muted">{compactNumber.format(entry.games)} игр</span>
           </span>
         </div>
       </div>
@@ -81,59 +115,90 @@ function LeaderCard({ entry, index }: { entry: MetaTierEntry; index: number }) {
   );
 }
 
+function HeroRow({ entry, rank }: { entry: MetaTierEntry; rank: number }) {
+  return (
+    <li>
+      <Link
+        href={heroBuildHref(entry)}
+        title={entryTitle(entry)}
+        className="group flex items-center gap-2.5 rounded-lg px-1.5 py-1.5 -mx-1.5 hover:bg-surface-raised transition"
+      >
+        <span className="font-mono text-[11px] text-ink-muted w-4 text-right shrink-0">{rank}</span>
+        <HeroIcon heroId={entry.heroId} size={28} />
+        <span className="flex-1 min-w-0">
+          <span className="flex items-baseline justify-between gap-2">
+            <span className="text-sm text-ink truncate group-hover:text-accent transition">{entry.heroName}</span>
+            <span className="font-mono text-sm font-semibold tabular-nums text-ink shrink-0">{entry.index}</span>
+          </span>
+          <span className="block text-[11px] font-mono tabular-nums text-ink-muted truncate">
+            <span style={{ color: winColor(entry.winRate) }}>{formatPercent(entry.winRate)}</span>
+            {" · "}
+            {compactNumber.format(entry.games)} игр
+          </span>
+        </span>
+      </Link>
+    </li>
+  );
+}
+
 function PositionColumn({ position, index, entries }: { position: string; index: number; entries: MetaTierEntry[] }) {
+  const top = entries.slice(0, VISIBLE_PER_POSITION);
+  const rest = entries.slice(VISIBLE_PER_POSITION);
   return (
     <div className="bg-surface border border-border rounded-2xl p-4">
       <div className="flex items-center gap-2 mb-3">
         <span className="w-6 h-6 rounded-md bg-surface-raised text-ink-secondary text-xs font-mono font-bold flex items-center justify-center">
           {index + 1}
         </span>
-        <h3 className="text-sm font-semibold text-ink">{roleLabelForPosition(position)}</h3>
+        <h3 className="text-sm font-semibold text-ink flex-1">{roleLabelForPosition(position)}</h3>
+        <span className="text-[11px] text-ink-muted">индекс</span>
       </div>
       {entries.length === 0 ? (
-        <p className="text-xs text-ink-muted leading-relaxed">На этой неделе мало игр на ранге Легенда и выше.</p>
+        <p className="text-xs text-ink-muted leading-relaxed">На этом патче мало игр на ранге Легенда и выше.</p>
       ) : (
-        <ol className="space-y-1">
-          {entries.map((e, i) => (
-            <li key={e.heroId}>
-              <Link
-                href={heroBuildHref(e)}
-                title={`${e.heroName}: ${e.games.toLocaleString("ru-RU")} ${pluralRu(e.games, ["игра", "игры", "игр"])} на этой позиции`}
-                className="group flex items-center gap-2.5 rounded-lg px-1.5 py-1.5 -mx-1.5 hover:bg-surface-raised transition"
-              >
-                <span className="font-mono text-[11px] text-ink-muted w-3 text-right shrink-0">{i + 1}</span>
-                <HeroIcon heroId={e.heroId} size={28} />
-                <span className="flex-1 min-w-0">
-                  <span className="flex items-baseline justify-between gap-2">
-                    <span className="text-sm text-ink truncate group-hover:text-accent transition">{e.heroName}</span>
-                    <span className="font-mono text-xs tabular-nums shrink-0" style={{ color: winColor(e.winRate) }}>
-                      {formatWinRate(e.winRate)}
-                    </span>
-                  </span>
-                  <span className="mt-1 block">
-                    <WinRateBar winRate={e.winRate} />
-                  </span>
+        <>
+          <ol className="space-y-1">
+            {top.map((e, i) => (
+              <HeroRow key={e.heroId} entry={e} rank={i + 1} />
+            ))}
+          </ol>
+          {rest.length > 0 && (
+            <details className="group mt-2">
+              <summary className="list-none cursor-pointer select-none flex items-center justify-between gap-2 rounded-lg px-1.5 py-1.5 -mx-1.5 text-xs text-ink-muted hover:text-ink hover:bg-surface-raised transition">
+                <span>
+                  <span className="group-open:hidden">Ещё</span>
+                  <span className="hidden group-open:inline">Скрыть</span> {rest.length}{" "}
+                  {pluralRu(rest.length, ["герой", "героя", "героев"])}
                 </span>
-              </Link>
-            </li>
-          ))}
-        </ol>
+                <span className="transition group-open:rotate-180" aria-hidden>
+                  ▾
+                </span>
+              </summary>
+              <ol className="space-y-1 mt-1">
+                {rest.map((e, i) => (
+                  <HeroRow key={e.heroId} entry={e} rank={VISIBLE_PER_POSITION + i + 1} />
+                ))}
+              </ol>
+            </details>
+          )}
+        </>
       )}
     </div>
   );
 }
 
 /**
- * This week's meta per position (STRATZ, Legend+), ranked by
- * confidence-adjusted win rate. Rendered on the server; every hero links to
- * its guide with the build for that exact position open.
+ * The current patch's meta per position (STRATZ, Legend+), ranked by the
+ * meta index - win rate on the role blended with games on it. Rendered on
+ * the server; every hero links to its guide with the build for that exact
+ * position open.
  */
 export async function MetaTierList() {
-  const tiers = await getAllHeroStats(getAllHeroes().map((h) => h.id))
-    .then(computeMetaTierList)
+  const data = await getPatchHeroStats(getAllHeroes().map((h) => h.id))
+    .then((patchStats) => ({ ...patchStats, tiers: computeMetaTierList(patchStats.stats) }))
     .catch(() => null);
 
-  if (!tiers) {
+  if (!data) {
     return (
       <Notice title="Не удалось загрузить мету">
         STRATZ сейчас не отвечает или не настроен ключ STRATZ_API_KEY. Попробуй обновить страницу через минуту.
@@ -141,15 +206,19 @@ export async function MetaTierList() {
     );
   }
 
+  const { tiers } = data;
   const leaders = POSITIONS.map((p) => tiers[p]?.[0]).filter((e): e is MetaTierEntry => Boolean(e));
+  const winRateWeight = Math.round(META_INDEX_WIN_RATE_WEIGHT * 100);
 
   return (
     <div className="space-y-12">
+      <PatchStrip data={data} />
+
       {leaders.length > 0 && (
         <section>
           <SectionHeading
             title="Лидеры позиций"
-            note="Самый надёжный герой на каждой роли. Нажми на героя - откроется его сборка именно для этой позиции."
+            note="Герой с самым высоким индексом на каждой роли. Нажми на героя - откроется его сборка именно для этой позиции."
           />
           <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
             {leaders.map((entry) => (
@@ -161,8 +230,8 @@ export async function MetaTierList() {
 
       <section>
         <SectionHeading
-          title="Топ по позициям"
-          note="Полоса показывает отклонение от 50% винрейта: вправо и зелёным - чаще побеждают, влево и красным - чаще проигрывают."
+          title="Индекс по позициям"
+          note="Справа - индекс от 0 до 100, под именем - винрейт на этой позиции (зелёный - выше 50%) и сколько игр на ней сыграно за патч."
         />
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5 items-start">
           {POSITIONS.map((p, i) => (
@@ -175,11 +244,29 @@ export async function MetaTierList() {
         <span className="w-9 h-9 rounded-xl bg-accent/12 text-accent flex items-center justify-center shrink-0 font-bold" aria-hidden>
           i
         </span>
-        <div className="text-sm text-ink-secondary leading-relaxed">
-          <p className="font-semibold text-ink mb-1">Как считается рейтинг</p>
-          Только игры на ранге Легенда и выше за текущую неделю. Сортировка - по винрейту с поправкой на
-          размер выборки: герою нужно реальное число игр на позиции, поэтому случайные офф-мета пики с
-          парой удачных матчей в список не попадают.
+        <div className="text-sm text-ink-secondary leading-relaxed space-y-2">
+          <p className="font-semibold text-ink">Как считается индекс</p>
+          <p>
+            Только игры на ранге Легенда и выше на текущем патче и только на этой позиции. Индекс складывается из
+            двух частей:
+          </p>
+          <ul className="list-disc pl-5 space-y-1">
+            <li>
+              <span className="text-ink">{winRateWeight}% - винрейт</span> относительно среднего по позиции: +5 п.п. и
+              выше дают максимум, −5 п.п. и ниже - ноль. Если игр немного, винрейт подтягивается к среднему, чтобы
+              удачная серия не выглядела как сильный герой.
+            </li>
+            <li>
+              <span className="text-ink">{100 - winRateWeight}% - число игр на роли</span>, по логарифмической шкале:
+              максимум у самого популярного героя позиции, вдвое больше игр - одинаковый шаг вверх на любом уровне.
+            </li>
+          </ul>
+          <p>
+            Герой стоит только на своих позициях: там, где его чаще всего играют на этом патче, и там, где его играют
+            почти так же часто (не меньше {Math.round(MIN_SHARE_OF_MAIN_POSITION * 100)}% от игр на основной роли).
+            Поэтому мидера не будет среди керри из-за редких игр, где он забрал фарм. Ещё не попадают герои, на которых
+            приходится меньше {(MIN_META_PICK_SHARE * 100).toLocaleString("ru-RU")}% игр позиции.
+          </p>
         </div>
       </div>
     </div>
@@ -189,6 +276,7 @@ export async function MetaTierList() {
 export function MetaTierListSkeleton() {
   return (
     <div className="space-y-12" aria-hidden>
+      <div className="h-[60px] rounded-2xl bg-surface border border-border animate-pulse" />
       <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
         {Array.from({ length: 5 }).map((_, i) => (
           <div key={i} className="h-[230px] rounded-2xl bg-surface border border-border animate-pulse" />
@@ -196,7 +284,7 @@ export function MetaTierListSkeleton() {
       </div>
       <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
         {Array.from({ length: 5 }).map((_, i) => (
-          <div key={i} className="h-[380px] rounded-2xl bg-surface border border-border animate-pulse" />
+          <div key={i} className="h-[440px] rounded-2xl bg-surface border border-border animate-pulse" />
         ))}
       </div>
     </div>

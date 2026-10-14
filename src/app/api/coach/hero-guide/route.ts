@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getHeroMatchups } from "@/lib/opendota";
+import { getHeroMatchups, getHeroProItemPopularity } from "@/lib/opendota";
 import { getHeroBuild, getHeroPositionStats } from "@/lib/stratz";
 import { getHeroAbilityKit } from "@/lib/heroAbilities";
 import { getHeroInternalName, getHeroName } from "@/lib/constants";
 import { computeHeroBuildOverview, computeHeroRoleOverview, roleLabelForPosition } from "@/lib/metrics/heroBuild";
 import { computeDraftInsights } from "@/lib/metrics/draftInsights";
+import { withReplays } from "@/lib/metrics/replayBuild";
 import { coachHeroGuide } from "@/lib/coach/client";
 import type { HeroGuideReport } from "@/lib/types";
 
@@ -22,15 +23,16 @@ function parse(heroIdRaw: unknown, positionRaw: unknown): { heroId: number; posi
 }
 
 async function writeGuide(heroId: number, requested: string | null): Promise<HeroGuideReport> {
-  const [positionStats, matchups] = await Promise.all([
+  const [positionStats, matchups, proItems] = await Promise.all([
     getHeroPositionStats(heroId).catch(() => []),
     getHeroMatchups(heroId).catch(() => null),
+    getHeroProItemPopularity(heroId).catch(() => null),
   ]);
   const roleOverview = computeHeroRoleOverview(heroId, positionStats);
   // The role asked for, else the one the hero is played in most.
   const position = requested ?? [...roleOverview.roles].sort((a, b) => b.games - a.games)[0]?.position ?? "POSITION_1";
   const games = positionStats.find((s) => s.position === position)?.matchCount ?? 0;
-  const build = games > 0 ? await getHeroBuild(heroId, position).then((b) => computeHeroBuildOverview(heroId, position, games, b)).catch(() => null) : null;
+  const build = games > 0 ? await getHeroBuild(heroId, position).then((b) => withReplays(computeHeroBuildOverview(heroId, position, games, b, proItems))).catch(() => null) : null;
 
   return coachHeroGuide({
     heroId,

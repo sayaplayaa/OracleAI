@@ -8,10 +8,12 @@ import {
   getItemNameByKey,
   getItemTier,
 } from "../constants";
+import { getHeroAbilityKit } from "../heroAbilities";
 import { getTalentLabel } from "../talents";
-import { wilsonScoreLowerBound } from "./statistics";
 import type {
+  StratzAbilityMaxLevel,
   StratzBootStat,
+  StratzGameMinuteStat,
   StratzHeroBuild,
   StratzHeroPositionStat,
   StratzItemStat,
@@ -19,13 +21,18 @@ import type {
   StratzTalentStat,
 } from "../stratz";
 import type {
+  GameLengthStat,
   HeroBuildOverview,
   HeroRoleOverview,
   ItemProgressionPoint,
   ItemStat,
+  ItemTiming,
   MetaTierEntry,
   NeutralItemTier,
+  OpenDotaItemPopularity,
+  ProItemStat,
   RolePickStat,
+  SkillOrderStep,
   TalentLevel,
 } from "../types";
 
@@ -66,47 +73,90 @@ export function computeHeroRoleOverview(
   return { heroId, heroName: getHeroName(heroId), roles };
 }
 
-// STRATZ's stats query is already restricted to Legend+ brackets (see
-// META_BRACKETS in stratz.ts), but "position" itself is STRATZ's own
-// per-match classifier inferred from farm priority, not a ground-truth
-// drafted role - a hero who happens to out-farm a bad teammate can get
-// mislabeled into a position they were never actually played for. Verified
-// empirically: real, deliberately-played meta picks cluster at 16,000+ games
-// a week even in this one bracket, while classifier noise (e.g. Leshrac
-// showing up as "Position 1") tops out in the hundreds - a 1,000-game floor
-// sits cleanly in that gap without cutting real smaller-but-legitimate picks.
-const MIN_GAMES_FOR_META = 1000;
-const HEROES_PER_POSITION = 8;
+// "Position" is STRATZ's own per-match classifier inferred from farm
+// priority, not the drafted role - a hero who out-farms a bad teammate gets
+// labeled into a role it was never picked for, and mostly in games it was
+// already winning. Those labels add up to small samples with inflated win
+// rates (7.41f, Legend+: Leshrac "carry" at 60.7% on 0.15% of carry games,
+// Meepo carry at 56% on 0.11%), while deliberate picks sit well above 0.2%
+// of the role's games. A share rather than a fixed count keeps the floor
+// meaningful whether the patch has one week of games or ten.
+export const MIN_META_PICK_SHARE = 0.002;
+// A hero is ranked only on its own positions: the one it's played on most
+// this patch, plus any other it's played on nearly as often (a real flex
+// pick - Earthshaker 3/4/2, supports moving between 4 and 5). A popular
+// hero's rare off-role games clear the floor above on their own: Necrophos
+// "carry" is 0.8% of carry games but 12% of Necrophos games, against 47% mid.
+export const MIN_SHARE_OF_MAIN_POSITION = 0.75;
+// Games at the position's average win rate mixed into every hero's record:
+// the fewer real games, the harder its edge is pulled toward the average.
+const WIN_RATE_PRIOR_GAMES = 2000;
+// A win rate this far above (below) the position's average maxes out (zeroes) the win-rate part.
+const WIN_RATE_SPAN = 0.05;
+// The rest of the index is how much the hero is played on the role.
+export const META_INDEX_WIN_RATE_WEIGHT = 0.6;
 const META_POSITIONS = ["POSITION_1", "POSITION_2", "POSITION_3", "POSITION_4", "POSITION_5"];
 
-/** Top real, current-meta heroes per position (Legend+ bracket, this week), for the Meta tier table. */
+/**
+ * Every hero on its own positions for the current patch (Legend+), best
+ * first, by the meta index: 0-100, blending the win rate on that exact role
+ * with how many games the hero gets on it. Win rate alone crowns
+ * misclassified off-role samples; games alone crowns comfort picks that lose.
+ */
 export function computeMetaTierList(
   allStats: StratzHeroPositionStat[]
 ): Record<string, MetaTierEntry[]> {
-  const eligible = allStats.filter(
-    (s) => s.position && s.matchCount >= MIN_GAMES_FOR_META
-  );
+  // Games on the hero's most played position.
+  const mainPositionGames = new Map<number, number>();
+  for (const s of allStats) {
+    if (!META_POSITIONS.includes(s.position)) continue;
+    mainPositionGames.set(s.heroId, Math.max(mainPositionGames.get(s.heroId) ?? 0, s.matchCount));
+  }
 
   const result: Record<string, MetaTierEntry[]> = {};
   for (const position of META_POSITIONS) {
+    const rows = allStats.filter((s) => s.position === position && s.matchCount > 0);
+    const totalGames = rows.reduce((sum, s) => sum + s.matchCount, 0);
+    const eligible = rows.filter(
+      (s) =>
+        s.matchCount >= totalGames * MIN_META_PICK_SHARE &&
+        s.matchCount >= (mainPositionGames.get(s.heroId) ?? 0) * MIN_SHARE_OF_MAIN_POSITION
+    );
+    if (eligible.length === 0) {
+      result[position] = [];
+      continue;
+    }
+    const averageWinRate = rows.reduce((sum, s) => sum + s.winCount, 0) / totalGames;
+    // Log scale: doubling the games is the same step at 0.5 -> 1% of the
+    // role as at 4 -> 8%. 0 at the floor, 1 for the role's most played hero.
+    const popularitySpan = Math.log(Math.max(...eligible.map((s) => s.matchCount)) / totalGames / MIN_META_PICK_SHARE);
+
     result[position] = eligible
-      .filter((s) => s.position === position)
-      .map((s) => ({
-        heroId: s.heroId,
-        heroName: getHeroName(s.heroId),
-        position: s.position,
-        roleLabel: roleLabelForPosition(s.position),
-        games: s.matchCount,
-        winRate: s.matchCount > 0 ? s.winCount / s.matchCount : 0,
-        // Sort key only, not returned - ranks by confidence-adjusted win rate
-        // so a handful of lucky games can't outrank a large reliable sample.
-        _rankScore: wilsonScoreLowerBound(s.winCount, s.matchCount),
-      }))
-      .sort((a, b) => b._rankScore - a._rankScore)
-      .slice(0, HEROES_PER_POSITION)
-      .map(({ _rankScore, ...entry }) => entry);
+      .map((s) => {
+        const pickShare = s.matchCount / totalGames;
+        const adjustedWinRate =
+          (s.winCount + WIN_RATE_PRIOR_GAMES * averageWinRate) / (s.matchCount + WIN_RATE_PRIOR_GAMES);
+        const winRateScore = clamp01(0.5 + (adjustedWinRate - averageWinRate) / (2 * WIN_RATE_SPAN));
+        const popularityScore = popularitySpan > 0 ? clamp01(Math.log(pickShare / MIN_META_PICK_SHARE) / popularitySpan) : 1;
+        return {
+          heroId: s.heroId,
+          heroName: getHeroName(s.heroId),
+          position: s.position,
+          roleLabel: roleLabelForPosition(s.position),
+          games: s.matchCount,
+          winRate: s.winCount / s.matchCount,
+          pickShare,
+          index: 100 * (META_INDEX_WIN_RATE_WEIGHT * winRateScore + (1 - META_INDEX_WIN_RATE_WEIGHT) * popularityScore),
+        };
+      })
+      .sort((a, b) => b.index - a.index)
+      .map((entry) => ({ ...entry, index: Math.round(entry.index) }));
   }
   return result;
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
 }
 
 function toItemStat(row: StratzNeutralItemStat): ItemStat | null {
@@ -122,7 +172,7 @@ function toItemStat(row: StratzNeutralItemStat): ItemStat | null {
 }
 
 // Bought for the moment, not part of a build.
-const CONSUMABLES = new Set([
+export const CONSUMABLES = new Set([
   "tango",
   "tango_single",
   "flask",
@@ -148,6 +198,10 @@ const CONSUMABLES = new Set([
 
 // An item bought in at least this share of games is core; below it, situational.
 const CORE_PICK_RATE = 0.2;
+// Within those, the build's spine: built in at least half the games that
+// lasted until its usual minute (Anti-Mage's Abyssal Blade: 44% of all games,
+// 62% of the games still going at minute 36). The rest are late options.
+const CORE_IF_REACHED = 0.5;
 const MIN_PICK_RATE = 0.03;
 // Cheap items bought in the first minutes form the early build, not the core.
 const EARLY_ITEM_MAX_COST = 1000;
@@ -162,6 +216,23 @@ interface Purchase {
   wins: number;
   // Median purchase minute.
   minute: number;
+  // First purchases by minute, earliest first.
+  byMinute: MinuteRow[];
+}
+
+interface MinuteRow {
+  minute: number;
+  count: number;
+  wins: number;
+}
+
+// What the item's timing and core status are judged against.
+interface BuildContext {
+  totalGames: number;
+  // The hero's win rate on this role; null without data.
+  roleWinRate: number | null;
+  // Games that lasted at least this many minutes.
+  gamesReaching: (minute: number) => number | null;
 }
 
 /**
@@ -172,29 +243,69 @@ interface Purchase {
  * third of its real number, and dropped real core items below the cutoff.
  */
 function firstPurchases(rows: StratzItemStat[]): Purchase[] {
-  const byItem = new Map<number, { count: number; wins: number; minutes: [number, number][] }>();
+  const byItem = new Map<number, { count: number; wins: number; byMinute: MinuteRow[] }>();
   for (const row of rows) {
     if ((row.instance ?? 0) !== 0) continue;
-    const entry = byItem.get(row.itemId) ?? { count: 0, wins: 0, minutes: [] };
+    const entry = byItem.get(row.itemId) ?? { count: 0, wins: 0, byMinute: [] };
     entry.count += row.matchCount;
     entry.wins += row.winCount;
-    entry.minutes.push([row.time ?? 0, row.matchCount]);
+    entry.byMinute.push({ minute: row.time ?? 0, count: row.matchCount, wins: row.winCount });
     byItem.set(row.itemId, entry);
   }
   return [...byItem.entries()].flatMap(([itemId, e]) => {
     const itemKey = getItemKeyById(itemId);
     if (!itemKey || e.count === 0) return [];
-    let seen = 0;
-    let minute = 0;
-    for (const [m, c] of e.minutes.sort((a, b) => a[0] - b[0])) {
-      seen += c;
-      if (seen >= e.count / 2) {
-        minute = m;
-        break;
-      }
-    }
-    return [{ itemKey, count: e.count, wins: e.wins, minute }];
+    const byMinute = e.byMinute.sort((a, b) => a.minute - b.minute);
+    return [{ itemKey, count: e.count, wins: e.wins, minute: minuteAtShare(byMinute, e.count, 0.5), byMinute }];
   });
+}
+
+// The minute by which this share of the purchases is done.
+function minuteAtShare(byMinute: MinuteRow[], total: number, target: number): number {
+  let seen = 0;
+  for (const row of byMinute) {
+    seen += row.count;
+    if (seen >= total * target) return row.minute;
+  }
+  return byMinute.at(-1)?.minute ?? 0;
+}
+
+function winRateOf(rows: MinuteRow[]): number {
+  const count = rows.reduce((sum, r) => sum + r.count, 0);
+  return count > 0 ? rows.reduce((sum, r) => sum + r.wins, 0) / count : 0;
+}
+
+// Fewer purchases than this in one minute say nothing about that minute.
+const MIN_TIMING_SAMPLE = 100;
+
+/**
+ * How the win rate moves with the minute the item is finished: the fastest
+ * and slowest quarters of purchases, and the last minute it still wins as
+ * often as the hero does on the role (Battle Fury on Anti-Mage: 65% at 12,
+ * 47% at 15, 28% at 18 minutes).
+ */
+function itemTiming(p: Purchase, roleWinRate: number | null): ItemTiming | undefined {
+  if (p.count < MIN_TIMING_SAMPLE * 4 || p.byMinute.length < 3) return undefined;
+  const fastMinute = minuteAtShare(p.byMinute, p.count, 0.25);
+  const slowMinute = minuteAtShare(p.byMinute, p.count, 0.75);
+  if (fastMinute >= slowMinute) return undefined;
+
+  // Only a run from the earliest minutes counts: a late minute that happens
+  // to win more after the item was already behind isn't "on time".
+  let onTimeMinute: number | null = null;
+  if (roleWinRate !== null) {
+    for (const row of p.byMinute.filter((r) => r.count >= MIN_TIMING_SAMPLE)) {
+      if (row.wins / row.count < roleWinRate) break;
+      onTimeMinute = row.minute;
+    }
+  }
+  return {
+    fastMinute,
+    fastWinRate: winRateOf(p.byMinute.filter((r) => r.minute <= fastMinute)),
+    slowMinute,
+    slowWinRate: winRateOf(p.byMinute.filter((r) => r.minute >= slowMinute)),
+    onTimeMinute,
+  };
 }
 
 // STRATZ's counts can run a little over its own game count (Invoker's Boots
@@ -203,14 +314,18 @@ function share(count: number, total: number): number {
   return total > 0 ? Math.min(1, count / total) : 0;
 }
 
-function toPoint(p: Purchase, totalGames: number): ItemProgressionPoint {
+function toPoint(p: Purchase, ctx: BuildContext): ItemProgressionPoint {
+  const reached = ctx.gamesReaching(p.minute);
+  const timing = itemTiming(p, ctx.roleWinRate);
   return {
     itemKey: p.itemKey,
     itemName: getItemNameByKey(p.itemKey),
     matchCount: p.count,
     winRate: p.count > 0 ? p.wins / p.count : 0,
-    pickRate: share(p.count, totalGames),
+    pickRate: share(p.count, ctx.totalGames),
     avgTimeSeconds: p.minute * 60,
+    ...(timing ? { timing } : {}),
+    ...(reached ? { pickRateIfReached: share(p.count, reached) } : {}),
   };
 }
 
@@ -296,12 +411,13 @@ function computeBoots(rows: StratzBootStat[], totalGames: number): ItemProgressi
  */
 function computeItemProgression(
   rows: StratzItemStat[],
-  totalGames: number
+  ctx: BuildContext
 ): Pick<HeroBuildOverview, "earlyItems" | "coreProgression" | "situationalItems"> {
+  const { totalGames } = ctx;
   const purchases = firstPurchases(rows).filter(
     (p) => !CONSUMABLES.has(p.itemKey) && totalGames > 0 && p.count / totalGames >= MIN_PICK_RATE
   );
-  const points = new Map(purchases.map((p) => [p.itemKey, toPoint(p, totalGames)]));
+  const points = new Map(purchases.map((p) => [p.itemKey, toPoint(p, ctx)]));
   const parts = new Map(purchases.map((p) => [p.itemKey, allComponents(p.itemKey)]));
 
   // A component can fold into an item that itself folds into a bigger one
@@ -338,7 +454,7 @@ function computeItemProgression(
       if (pick >= EARLY_ITEM_PICK_RATE) early.push(point);
       else situational.push(point);
     } else if (pick >= CORE_PICK_RATE) {
-      core.push(point);
+      core.push({ ...point, isCore: (point.pickRateIfReached ?? pick) >= CORE_IF_REACHED });
     } else {
       situational.push(point);
     }
@@ -403,12 +519,115 @@ function computeTalents(heroId: number, talentStats: StratzTalentStat[]): Talent
   });
 }
 
+// Short, medium and long games. STRATZ counts games by the minutes they
+// reached only up to 35, so the last bucket is "longer than 35".
+const GAME_LENGTH_BOUNDS = [0, 30, 35];
+const MIN_GAME_LENGTH_SAMPLE = 200;
+
+function computeGameLength(rows: StratzGameMinuteStat[]): GameLengthStat[] {
+  const byMinute = new Map(rows.map((r) => [r.time, r]));
+  return GAME_LENGTH_BOUNDS.flatMap((from, i) => {
+    const to = GAME_LENGTH_BOUNDS[i + 1] ?? null;
+    const start = byMinute.get(from);
+    const end = to === null ? undefined : byMinute.get(to);
+    if (!start || (to !== null && !end)) return [];
+    const games = start.matchCount - (end?.matchCount ?? 0);
+    const wins = start.winCount - (end?.winCount ?? 0);
+    return games >= MIN_GAME_LENGTH_SAMPLE ? [{ fromMinute: from, toMinute: to, games, winRate: wins / games }] : [];
+  });
+}
+
+// "Games that lasted at least N minutes", from the per-minute counts; past
+// the last counted minute, the last count (an overestimate, so a late item's
+// share of the games that reached it errs low).
+function gamesReachingFrom(rows: StratzGameMinuteStat[]): (minute: number) => number | null {
+  if (rows.length === 0) return () => null;
+  const sorted = [...rows].sort((a, b) => a.time - b.time);
+  return (minute) => {
+    let count: number | null = null;
+    for (const r of sorted) {
+      if (r.time > minute) break;
+      count = r.matchCount;
+    }
+    return count && count > 0 ? count : null;
+  };
+}
+
+// An ability maxed in fewer games than this isn't part of the usual order.
+const MIN_SKILL_MAX_SHARE = 0.2;
+
+/** The hero's abilities in the order they're usually maxed, by median hero level. */
+function computeSkillOrder(heroId: number, rows: StratzAbilityMaxLevel[], totalGames: number): SkillOrderStep[] {
+  const kit = new Map(getHeroAbilityKit(heroId).filter((a) => !a.isInnate).map((a) => [a.key, a]));
+  const byAbility = new Map<string, { level: number; count: number }[]>();
+  for (const row of rows) {
+    const key = getAbilityNameById(row.abilityId);
+    if (!key || !kit.has(key)) continue;
+    byAbility.set(key, [...(byAbility.get(key) ?? []), { level: row.level, count: row.matchCount }]);
+  }
+  return [...byAbility.entries()]
+    .flatMap(([key, levels]) => {
+      const count = levels.reduce((sum, l) => sum + l.count, 0);
+      if (totalGames === 0 || count / totalGames < MIN_SKILL_MAX_SHARE) return [];
+      let seen = 0;
+      let median = 0;
+      for (const l of levels.sort((a, b) => a.level - b.level)) {
+        seen += l.count;
+        if (seen >= count / 2) {
+          median = l.level;
+          break;
+        }
+      }
+      const ability = kit.get(key)!;
+      return [{ abilityKey: key, abilityName: ability.name, iconUrl: ability.iconUrl, maxedAtLevel: median, share: share(count, totalGames) }];
+    })
+    .sort((a, b) => a.maxedAtLevel - b.maxedAtLevel);
+}
+
+// Full items that aren't built from anything (Blink Dagger, Aghanim's Shard)
+// but are a choice of their own, unlike Ultimate Orb or Demon Edge.
+const STANDALONE_ITEMS = new Set(["blink", "aghanims_shard"]);
+const PRO_ITEM_MIN_COST = 1000;
+const PRO_ITEMS = 10;
+const PRO_PARENT_SHARE = 0.2;
+
+/** Full items recent professional games buy on the hero - not components, consumables or cheap starters. */
+export function computeProItems(popularity: OpenDotaItemPopularity | null): ProItemStat[] {
+  if (!popularity) return [];
+  const counts = new Map<string, number>();
+  for (const phase of [popularity.early_game_items, popularity.mid_game_items, popularity.late_game_items]) {
+    for (const [itemId, count] of Object.entries(phase ?? {})) {
+      const itemKey = getItemKeyById(Number(itemId));
+      if (!itemKey || CONSUMABLES.has(itemKey) || getItemCostByKey(itemKey) < PRO_ITEM_MIN_COST) continue;
+      if (getItemComponents(itemKey).length === 0 && !STANDALONE_ITEMS.has(itemKey)) continue;
+      counts.set(itemKey, (counts.get(itemKey) ?? 0) + count);
+    }
+  }
+  // A component mostly bought on the way to a bigger item the pros also buy
+  // (Perseverance into Battle Fury, Kaya into Meteor Hammer) isn't a choice.
+  const parts = new Map([...counts.keys()].map((key) => [key, allComponents(key)]));
+  const onTheWay = (key: string, count: number) =>
+    [...counts.entries()].some(([other, otherCount]) => other !== key && parts.get(other)!.has(key) && otherCount >= count * PRO_PARENT_SHARE);
+  return [...counts.entries()]
+    .filter(([itemKey, games]) => !onTheWay(itemKey, games))
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, PRO_ITEMS)
+    .map(([itemKey, games]) => ({ itemKey, itemName: getItemNameByKey(itemKey), games }));
+}
+
 export function computeHeroBuildOverview(
   heroId: number,
   position: string,
   totalGamesForPosition: number,
-  build: StratzHeroBuild
+  build: StratzHeroBuild,
+  proPopularity: OpenDotaItemPopularity | null = null
 ): HeroBuildOverview {
+  const allGames = build.gameMinutes.find((r) => r.time === 0);
+  const ctx: BuildContext = {
+    totalGames: totalGamesForPosition,
+    roleWinRate: allGames && allGames.matchCount > 0 ? allGames.winCount / allGames.matchCount : null,
+    gamesReaching: gamesReachingFrom(build.gameMinutes),
+  };
   return {
     heroId,
     position,
@@ -416,8 +635,14 @@ export function computeHeroBuildOverview(
     games: totalGamesForPosition,
     startingItems: computeStartingItems(build.startingItems, totalGamesForPosition),
     boots: computeBoots(build.boots, totalGamesForPosition),
-    ...computeItemProgression(build.fullPurchases, totalGamesForPosition),
+    ...computeItemProgression(build.fullPurchases, ctx),
     neutralTiers: computeNeutralTiers(build.neutralItems),
     talents: computeTalents(heroId, build.talents),
+    winRate: ctx.roleWinRate,
+    gameLength: computeGameLength(build.gameMinutes),
+    skillOrder: computeSkillOrder(heroId, build.abilityMaxLevels, totalGamesForPosition),
+    proItems: computeProItems(proPopularity),
+    // Filled from parsed games by withReplays (metrics/replayBuild.ts).
+    replays: null,
   };
 }

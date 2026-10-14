@@ -1,7 +1,8 @@
 // Builds src/data/dota-ru.json: the official Russian Dota 2 client text for
 // every hero ability and talent the app shows (descriptions, attribute labels,
-// talent texts), straight from Valve's own localization file - so the Russian
-// UI quotes the game's real wording instead of a machine translation.
+// talent texts, the ability's mechanics notes and what Aghanim's Scepter and
+// Shard change in it), straight from Valve's own localization file - so the
+// Russian UI quotes the game's real wording instead of a machine translation.
 //
 // Source: Valve's resource/localization/abilities_russian.txt, as mirrored from
 // the game files by github.com/dotabuff/d2vpkr. Usage:
@@ -131,6 +132,33 @@ function parseKeyValues(source) {
   return block();
 }
 
+// Every ability's own values (lower-cased names), for the %value% placeholders
+// in its notes and Aghanim's texts. Hero files come after npc_abilities.txt
+// and win. A value only Aghanim's unlocks is 0 on its own and carries the real
+// number as a modifier ("value" "0", "special_bonus_scepter" "+20"), so the
+// Scepter and Shard texts get their own copy with the modifier applied.
+const abilityValues = {};
+const upgradedValues = { scepter: {}, shard: {} };
+
+// "+20", "-1", "=3", "x2", per level: "0 0 0" with "+20" -> "20 20 20".
+function applyModifier(base, modifier) {
+  const m = /^([+\-=x])?\s*(-?[\d.]+)$/.exec(String(modifier).trim());
+  if (!m) return base;
+  const [, op = "+", raw] = m;
+  const by = Number(raw);
+  return String(base)
+    .trim()
+    .split(/\s+/)
+    .map((v) => {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return v;
+      if (op === "=") return String(by);
+      if (op === "x") return String(n * by);
+      return String(op === "-" ? n - by : n + by);
+    })
+    .join(" ");
+}
+
 function collectTalentValues(node, out) {
   if (!node || typeof node !== "object") return;
   for (const [name, entry] of Object.entries(node)) {
@@ -138,9 +166,17 @@ function collectTalentValues(node, out) {
     const values = entry.AbilityValues;
     if (values && typeof values === "object") {
       for (const [valueName, value] of Object.entries(values)) {
+        const own = typeof value === "object" ? value.value : value;
         if (name.startsWith("special_bonus_")) {
-          const own = typeof value === "object" ? value.value : value;
           if (own !== undefined) (out[name] ??= {})[valueName] = String(own);
+        } else if (own !== undefined) {
+          (abilityValues[name] ??= {})[valueName.toLowerCase()] = String(own);
+          for (const upgrade of ["scepter", "shard"]) {
+            const modifier = typeof value === "object" ? value[`special_bonus_${upgrade}`] : undefined;
+            if (modifier !== undefined) {
+              (upgradedValues[upgrade][name] ??= {})[valueName.toLowerCase()] = applyModifier(own, modifier);
+            }
+          }
         }
         if (value && typeof value === "object") {
           for (const [k, v] of Object.entries(value)) {
@@ -169,6 +205,64 @@ for (const hero of Object.values(dc.heroes)) {
     console.warn(`Skipped ${file}: ${err.message}`);
   }
 }
+// ---- Mechanics notes and Aghanim's upgrades ----
+// The client's notes under an ability ("Meat Hook pulls allies", "Blink dodges
+// projectiles") and the Scepter/Shard texts, filled with the ability's values.
+// A text with a value the files don't have is left out rather than shown with
+// a hole in it - and so is one where the value is 0: an upgrade value set
+// somewhere this script doesn't read ("0 beams" for Invoker's Cataclysm).
+function formatValue(raw) {
+  return String(raw)
+    .trim()
+    .split(/\s+/)
+    .map((v) => (Number.isFinite(Number(v)) ? String(Number(v)) : v))
+    .join(" / ");
+}
+
+function fillTemplate(template, values) {
+  let missing = false;
+  const filled = template.replace(/%([a-z0-9_]+)%/gi, (_, key) => {
+    const value = values?.[key.toLowerCase()];
+    if (value === undefined || /^[\s0.]*$/.test(value)) {
+      missing = true;
+      return "";
+    }
+    return formatValue(value);
+  });
+  if (missing) return null;
+  return filled
+    .replace(/%{2,}/g, "%")
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+let noteCount = 0;
+for (const hero of Object.values(dc.hero_abilities)) {
+  for (const key of hero.abilities ?? []) {
+    if (!dc.abilities[key]?.dname) continue;
+    const text = (suffix, upgrade) => {
+      const template = tokens.get(`dota_tooltip_ability_${key}_${suffix}`.toLowerCase());
+      const values = { ...abilityValues[key], ...(upgrade ? upgradedValues[upgrade][key] : {}) };
+      return template ? fillTemplate(template, values) : null;
+    };
+    const notes = [];
+    for (let n = 0; n < 10; n++) {
+      const note = text(`note${n}`);
+      if (note) notes.push(note);
+    }
+    const scepter = text("scepter_description", "scepter");
+    const shard = text("shard_description", "shard");
+    if (notes.length === 0 && !scepter && !shard) continue;
+    const entry = (abilities[key] ??= {});
+    if (notes.length > 0) entry.notes = notes;
+    if (scepter) entry.scepter = scepter;
+    if (shard) entry.shard = shard;
+    noteCount += notes.length;
+  }
+}
+
 // Every talent's numbers - also for talents without Russian text, which the
 // game shows in English, filled with the same values.
 const usedTalentValues = Object.fromEntries(
@@ -181,5 +275,5 @@ fs.writeFileSync(
   JSON.stringify({ source: SOURCE_URL, builtAt: new Date().toISOString(), abilities, talents, talentValues: usedTalentValues })
 );
 console.log(
-  `Wrote ${OUT}: ${Object.keys(abilities).length} abilities, ${Object.keys(talents).length} talents (${Object.keys(usedTalentValues).length} with values; ${tokens.size} tokens parsed).`
+  `Wrote ${OUT}: ${Object.keys(abilities).length} abilities (${noteCount} notes), ${Object.keys(talents).length} talents (${Object.keys(usedTalentValues).length} with values; ${tokens.size} tokens parsed).`
 );
